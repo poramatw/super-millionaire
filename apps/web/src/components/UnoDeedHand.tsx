@@ -1,12 +1,28 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
+  COLOR_GROUP_TILES,
+  HOTEL_RENTS,
   calculateRent,
   getTile,
   ownsFullColorGroup,
+  type ColorGroup,
   type GameState,
 } from '@super-millionaire/shared';
 import { HotelPiece, HousePiece } from '../artwork';
 import { COLOR_GROUP_META, formatBahtNumber } from '../utils/boardLayout';
+
+const GROUP_SORT_ORDER: Readonly<Record<ColorGroup, number>> = {
+  hotel: 0,
+  utility: 1,
+  brown: 2,
+  lightBlue: 3,
+  darkGreen: 4,
+  orange: 5,
+  skyBlue: 6,
+  red: 7,
+  limeGreen: 8,
+  darkRed: 9,
+};
 
 export interface UnoDeedHandProps {
   gameState: GameState;
@@ -25,6 +41,29 @@ export function UnoDeedHand({
 }: UnoDeedHandProps) {
   const [hoveredTileIndex, setHoveredTileIndex] = useState<number | null>(null);
 
+  const myPlayer = useMemo(
+    () =>
+      !isSpectator && myPlayerId
+        ? gameState.players.find((p) => p.id === myPlayerId) ?? null
+        : null,
+    [gameState.players, isSpectator, myPlayerId],
+  );
+
+  // Sort deeds by color group so matching sets (especially Hotels & Utilities) stack side-by-side
+  const ownedDeeds = useMemo(() => {
+    if (!myPlayer) return [];
+    return Object.values(gameState.deeds)
+      .filter((d) => d.ownerId === myPlayer.id)
+      .sort((a, b) => {
+        const gA = getTile(a.tileIndex).colorGroup;
+        const gB = getTile(b.tileIndex).colorGroup;
+        const oA = gA ? GROUP_SORT_ORDER[gA] : 99;
+        const oB = gB ? GROUP_SORT_ORDER[gB] : 99;
+        if (oA !== oB) return oA - oB;
+        return a.tileIndex - b.tileIndex;
+      });
+  }, [gameState.deeds, myPlayer]);
+
   if (isSpectator || !myPlayerId) {
     return (
       <div className="pointer-events-none flex w-full justify-center px-2">
@@ -35,12 +74,7 @@ export function UnoDeedHand({
     );
   }
 
-  const myPlayer = gameState.players.find((p) => p.id === myPlayerId);
   if (!myPlayer) return null;
-
-  const ownedDeeds = Object.values(gameState.deeds)
-    .filter((d) => d.ownerId === myPlayer.id)
-    .sort((a, b) => a.tileIndex - b.tileIndex);
 
   const count = ownedDeeds.length;
 
@@ -59,20 +93,46 @@ export function UnoDeedHand({
     );
   }
 
-  const maxSpread = Math.min(18, Math.max(4, count * 2.5));
-  const overlapMargin =
-    count >= 10 ? '-32px' : count >= 7 ? '-26px' : count >= 4 ? '-20px' : '-12px';
+  // Group stack stats (Hotels scaling rent, Utilities multiplier, Completed color sets)
+  const ownedHotelCount = ownedDeeds.filter(
+    (d) => getTile(d.tileIndex).colorGroup === 'hotel' && !d.isMortgaged,
+  ).length;
+  const totalHotelOwned = ownedDeeds.filter(
+    (d) => getTile(d.tileIndex).colorGroup === 'hotel',
+  ).length;
+  const hotelTierRent =
+    ownedHotelCount > 0 ? HOTEL_RENTS[Math.min(ownedHotelCount, HOTEL_RENTS.length) - 1] ?? 0 : 0;
+
+  const ownedUtilCount = ownedDeeds.filter(
+    (d) => getTile(d.tileIndex).colorGroup === 'utility' && !d.isMortgaged,
+  ).length;
+  const totalUtilOwned = ownedDeeds.filter(
+    (d) => getTile(d.tileIndex).colorGroup === 'utility',
+  ).length;
+
+  const completedColorGroups = (
+    ['brown', 'lightBlue', 'darkGreen', 'orange', 'skyBlue', 'red', 'limeGreen', 'darkRed'] as ColorGroup[]
+  ).filter((g) => ownsFullColorGroup(gameState, myPlayer.id, g));
+
+  const activeFocusIndex = ownedDeeds.findIndex(
+    (d) => d.tileIndex === (hoveredTileIndex ?? selectedTileIndex),
+  );
+  const maxSpread = Math.min(16, Math.max(3, count * 2.1));
 
   return (
     <section
       aria-label="โฉนดในมือของคุณ"
       className="pointer-events-none relative flex w-full max-w-full flex-col items-center"
     >
-      {/* Floating Hearthstone / Balatro / UNO Arc */}
-      <div className="deed-hand-scroll pointer-events-auto w-full max-w-full overflow-x-auto overflow-y-visible pt-6 pb-2">
-        <div className="mx-auto flex w-max items-end justify-center px-6 sm:px-10">
+      {/* Floating Hearthstone / Balatro / UNO Arc with Group Stacking */}
+      <div className="deed-hand-scroll pointer-events-auto w-full max-w-full overflow-x-auto overflow-y-visible pt-10 pb-2">
+        <div className="mx-auto flex w-max items-end justify-center px-8 sm:px-12">
           {ownedDeeds.map((deed, idx) => {
             const tile = getTile(deed.tileIndex);
+            const prevTile = idx > 0 ? getTile(ownedDeeds[idx - 1]!.tileIndex) : null;
+            const sameGroupAsPrev = Boolean(
+              prevTile && tile.colorGroup && prevTile.colorGroup === tile.colorGroup,
+            );
             const meta = tile.colorGroup ? COLOR_GROUP_META[tile.colorGroup] : null;
             const headerHex = meta?.bandBg ?? '#5a4d3f';
             const headerText = meta?.bandText ?? '#FFF8EB';
@@ -86,16 +146,41 @@ export function UnoDeedHand({
                 : false;
             const currentRent = calculateRent(gameState, tile.index);
 
+            const groupTotal = tile.colorGroup ? COLOR_GROUP_TILES[tile.colorGroup].length : 1;
+            const groupOwned = tile.colorGroup
+              ? ownedDeeds.filter((d) => getTile(d.tileIndex).colorGroup === tile.colorGroup).length
+              : 1;
+
             const mid = (count - 1) / 2;
             const normalized = count <= 1 ? 0 : (idx - mid) / Math.max(mid, 1);
             const fanDeg = normalized * maxSpread;
-            const arcDrop = Math.pow(Math.abs(normalized), 1.6) * 18;
+            const arcDrop = Math.pow(Math.abs(normalized), 1.6) * 16;
+
+            // Smoothly part adjacent stacked cards so inspecting one card is effortless
+            let neighborPushX = 0;
+            if (activeFocusIndex !== -1 && idx !== activeFocusIndex) {
+              const distance = Math.abs(idx - activeFocusIndex);
+              if (distance <= 2) {
+                neighborPushX = idx < activeFocusIndex ? -18 / distance : 18 / distance;
+              }
+            }
+
+            const cardMarginLeft =
+              idx === 0
+                ? '0px'
+                : sameGroupAsPrev
+                  ? count >= 9
+                    ? '-36px'
+                    : '-28px'
+                  : count >= 9
+                    ? '-6px'
+                    : '8px';
 
             const cardTransform = isRaised
-              ? 'rotate(0deg) translateY(-36px) scale(1.14)'
+              ? 'rotate(0deg) translateY(-42px) scale(1.15)'
               : isStanding
-                ? `rotate(${(fanDeg * 0.4).toFixed(1)}deg) translateY(${Math.max(-14, arcDrop - 14).toFixed(1)}px) scale(1.03)`
-                : `rotate(${fanDeg.toFixed(1)}deg) translateY(${arcDrop.toFixed(1)}px) scale(1)`;
+                ? `translateX(${neighborPushX.toFixed(1)}px) rotate(${(fanDeg * 0.4).toFixed(1)}deg) translateY(${Math.max(-14, arcDrop - 14).toFixed(1)}px) scale(1.03)`
+                : `translateX(${neighborPushX.toFixed(1)}px) rotate(${fanDeg.toFixed(1)}deg) translateY(${arcDrop.toFixed(1)}px) scale(1)`;
 
             return (
               <button
@@ -108,7 +193,7 @@ export function UnoDeedHand({
                 style={{
                   transform: cardTransform,
                   transformOrigin: 'center 220%',
-                  marginLeft: idx === 0 ? 0 : overlapMargin,
+                  marginLeft: cardMarginLeft,
                   zIndex: isRaised ? 80 : isStanding ? 45 : idx + 10,
                 }}
                 className={`deed-fan-card cardstock-texture relative flex h-[116px] w-[84px] shrink-0 flex-col overflow-hidden rounded-xl border-2 text-left text-[#1c1814] focus:outline-none sm:h-[130px] sm:w-[94px] ${
@@ -128,11 +213,15 @@ export function UnoDeedHand({
                   <span className="mono-num drop-shadow-sm">
                     #{tile.deedNumber ?? tile.index}
                   </span>
-                  {fullGroup && !deed.isMortgaged && (
+                  {fullGroup && !deed.isMortgaged ? (
                     <span className="rounded bg-black/35 px-1 py-0.2 text-[8px] text-white">
                       ครบชุด
                     </span>
-                  )}
+                  ) : groupTotal > 1 ? (
+                    <span className="mono-num rounded bg-black/25 px-1 py-0.2 text-[8px] text-white/95">
+                      {groupOwned}/{groupTotal}
+                    </span>
+                  ) : null}
                 </div>
 
                 {/* Body */}
@@ -184,14 +273,44 @@ export function UnoDeedHand({
         </div>
       </div>
 
-      {/* Subtle floating count & jail-free badge tucked under the fanned cards */}
-      <div className="pointer-events-auto mt-0.5 flex items-center gap-2 rounded-full border border-amber-400/35 bg-stone-950/85 px-3 py-0.5 text-[10px] font-bold text-amber-200 shadow-md backdrop-blur-md">
-        <span>โฉนดในมือ ({count})</span>
-        {myPlayer.jailFreeCards > 0 && (
-          <span className="rounded-full bg-emerald-700/90 px-1.5 py-0.2 text-[9px] text-white">
-            พ้นคุก ×{myPlayer.jailFreeCards}
-          </span>
+      {/* Floating count & combined stack-value badges tucked under the fanned cards */}
+      <div className="pointer-events-auto mt-0.5 flex max-w-full flex-wrap items-center justify-center gap-1.5 px-2">
+        <div className="flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-stone-950/88 px-3 py-0.5 text-[10px] font-bold text-amber-200 shadow-md backdrop-blur-md">
+          <span>โฉนดในมือ ({count})</span>
+          {myPlayer.jailFreeCards > 0 && (
+            <span className="rounded-full bg-emerald-700/90 px-1.5 py-0.2 text-[9px] text-white">
+              พ้นคุก ×{myPlayer.jailFreeCards}
+            </span>
+          )}
+        </div>
+
+        {totalHotelOwned > 0 && (
+          <div className="rounded-full border border-sky-400/45 bg-[#1E3A5F]/95 px-2.5 py-0.5 text-[10px] font-bold text-amber-100 shadow-md backdrop-blur-md">
+            🏨 โรงแรม {totalHotelOwned}/5 • ค่าเช่า{' '}
+            <span className="mono-num text-amber-300">
+              ฿{formatBahtNumber(hotelTierRent)}
+            </span>
+            /แห่ง
+          </div>
         )}
+
+        {totalUtilOwned > 0 && (
+          <div className="rounded-full border border-slate-400/45 bg-slate-800/95 px-2.5 py-0.5 text-[10px] font-bold text-slate-100 shadow-md backdrop-blur-md">
+            ⚡ สาธารณูปโภค {totalUtilOwned}/2 •{' '}
+            <span className="mono-num text-emerald-300">
+              ×{ownedUtilCount >= 2 ? 100 : 40}
+            </span>
+          </div>
+        )}
+
+        {completedColorGroups.map((cg) => (
+          <div
+            key={cg}
+            className="rounded-full border border-emerald-400/45 bg-emerald-950/90 px-2.5 py-0.5 text-[10px] font-bold text-emerald-200 shadow-md backdrop-blur-md"
+          >
+            ✨ ครบชุด {COLOR_GROUP_META[cg].label} (×2)
+          </div>
+        ))}
       </div>
     </section>
   );

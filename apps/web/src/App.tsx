@@ -282,6 +282,10 @@ export default function App() {
   const [showThrownDiceOverlay, setShowThrownDiceOverlay] = useState(false);
   const [throwKey, setThrowKey] = useState(0);
   const [thrownDiceFaces, setThrownDiceFaces] = useState<DiceRollResult | null>(null);
+  const [activeCardDraw, setActiveCardDraw] = useState<{
+    deck: 'chance' | 'chest';
+    key: number;
+  } | null>(null);
 
   const prevPositionsRef = useRef<Record<string, number>>({});
   const lastLedgerSeqRef = useRef<number>(0);
@@ -294,6 +298,78 @@ export default function App() {
   const buildFxTimerRef = useRef<number | null>(null);
   const cashFxTimerRef = useRef<number | null>(null);
   const cashDeltaTimerRef = useRef<number | null>(null);
+  const autoModalTimerRef = useRef<number | null>(null);
+  const pendingWalkCashFxRef = useRef<CashTransferFx | null>(null);
+  const pendingWalkCashDeltaRef = useRef<{ amount: number; key: number } | null>(null);
+  const pendingWalkSoundsRef = useRef<Array<'cash' | 'card' | 'jail'>>([]);
+  const pendingCardRevealRef = useRef<DrawnCardInfo | null>(null);
+  const postCardAutoTileRef = useRef<number | null>(null);
+
+  const triggerCashTransferFx = useCallback((fx: CashTransferFx) => {
+    if (cashFxTimerRef.current !== null) window.clearTimeout(cashFxTimerRef.current);
+    setCashTransferFx(fx);
+    cashFxTimerRef.current = window.setTimeout(() => {
+      setCashTransferFx(null);
+    }, 3400);
+  }, []);
+
+  const triggerCashDelta = useCallback((delta: { amount: number; key: number }) => {
+    if (cashDeltaTimerRef.current !== null) window.clearTimeout(cashDeltaTimerRef.current);
+    setMyCashDelta(delta);
+    cashDeltaTimerRef.current = window.setTimeout(() => {
+      setMyCashDelta(null);
+    }, 3200);
+  }, []);
+
+  const flushPostWalkEffects = useCallback(
+    (autoOpenTileIndex: number | null) => {
+      const sounds = pendingWalkSoundsRef.current;
+      pendingWalkSoundsRef.current = [];
+      for (const s of sounds) {
+        if (s === 'cash') soundFX.playCashChing();
+        else if (s === 'card') soundFX.playCardFlip();
+        else if (s === 'jail') soundFX.playJailBuzzer();
+      }
+
+      const queuedCashFx = pendingWalkCashFxRef.current;
+      pendingWalkCashFxRef.current = null;
+      if (queuedCashFx) {
+        triggerCashTransferFx(queuedCashFx);
+      }
+
+      const queuedCashDelta = pendingWalkCashDeltaRef.current;
+      pendingWalkCashDeltaRef.current = null;
+      if (queuedCashDelta) {
+        triggerCashDelta(queuedCashDelta);
+      }
+
+      const queuedCard = pendingCardRevealRef.current;
+      pendingCardRevealRef.current = null;
+      if (queuedCard) {
+        setActiveCardDraw({ deck: queuedCard.card.deck, key: Date.now() });
+        setRevealedCard(queuedCard);
+        postCardAutoTileRef.current = autoOpenTileIndex;
+        return;
+      }
+
+      if (autoOpenTileIndex !== null) {
+        if (autoModalTimerRef.current !== null) {
+          window.clearTimeout(autoModalTimerRef.current);
+          autoModalTimerRef.current = null;
+        }
+        // If rent/tax coins are flying, give 750ms so the player clearly sees coins & -฿ before modal pops
+        if (queuedCashFx || queuedCashDelta) {
+          autoModalTimerRef.current = window.setTimeout(() => {
+            autoModalTimerRef.current = null;
+            setSelectedTileIndex(autoOpenTileIndex);
+          }, 750);
+        } else {
+          setSelectedTileIndex(autoOpenTileIndex);
+        }
+      }
+    },
+    [triggerCashDelta, triggerCashTransferFx],
+  );
 
   useEffect(() => {
     document.title = 'ซุปเปอร์เศรษฐี No. 9028 — Super Millionaire';
@@ -388,9 +464,9 @@ export default function App() {
       setDisplayPositions(nextSnapshot);
       setAnimatingPlayerId(null);
       setHopSpotlightTile(null);
-      if (shouldAutoOpenTileModal) {
-        setSelectedTileIndex(toPos);
-      }
+      window.setTimeout(() => {
+        flushPostWalkEffects(shouldAutoOpenTileModal ? toPos : null);
+      }, 60);
       return;
     }
 
@@ -400,14 +476,14 @@ export default function App() {
 
     setAnimatingPlayerId(movedPlayerId);
 
-    // Check if this update also contains a fresh dice roll so hops start as the dice land
+    // Check if this update also contains a fresh dice roll so hops start cleanly after dice tumble
     const latestRoll = [...gameState.banker.ledger]
       .reverse()
       .find((e) => e.type === 'DICE_ROLL');
     const isFreshDiceMove = Boolean(
       latestRoll && latestRoll.seq > lastDiceRollSeqRef.current,
     );
-    const initialDelay = isFreshDiceMove ? 420 : 120;
+    const initialDelay = isFreshDiceMove ? 560 : 140;
 
     const runStep = () => {
       step += 1;
@@ -427,15 +503,13 @@ export default function App() {
           setAnimatingPlayerId(null);
           setHopSpotlightTile(null);
           setDisplayPositions(nextSnapshot);
-          if (shouldAutoOpenTileModal) {
-            setSelectedTileIndex(toPos);
-          }
-        }, 240);
+          flushPostWalkEffects(shouldAutoOpenTileModal ? toPos : null);
+        }, 260);
       }
     };
 
     hopTimerRef.current = window.setTimeout(runStep, initialDelay);
-  }, [gameState, myPlayerId, isSpectator]);
+  }, [gameState, myPlayerId, isSpectator, flushPostWalkEffects]);
 
   // Cleanup dice, hop & FX timers on unmount
   useEffect(() => {
@@ -447,6 +521,7 @@ export default function App() {
       if (buildFxTimerRef.current !== null) window.clearTimeout(buildFxTimerRef.current);
       if (cashFxTimerRef.current !== null) window.clearTimeout(cashFxTimerRef.current);
       if (cashDeltaTimerRef.current !== null) window.clearTimeout(cashDeltaTimerRef.current);
+      if (autoModalTimerRef.current !== null) window.clearTimeout(autoModalTimerRef.current);
     };
   }, []);
 
@@ -474,6 +549,8 @@ export default function App() {
     if (newEntries.length === 0) return;
     lastLedgerSeqRef.current = latestSeq;
 
+    const isWalkInProgress = hopTimerRef.current !== null;
+
     for (const entry of newEntries) {
       switch (entry.type) {
         case 'DICE_ROLL': {
@@ -489,39 +566,15 @@ export default function App() {
             setThrowKey((k) => k + 1);
             setIsThrowingDice(true);
             setShowThrownDiceOverlay(true);
-
-            let tick = 0;
-            setThrownDiceFaces({
-              die1: ((realDice.die1 + 2) % 6) + 1,
-              die2: ((realDice.die2 + 4) % 6) + 1,
-              total: realDice.total,
-              isDoubles: realDice.isDoubles,
-            });
-
-            diceIntervalRef.current = window.setInterval(() => {
-              tick += 1;
-              const d1 = ((tick * 3 + realDice.die1) % 6) + 1;
-              const d2 = ((tick * 5 + realDice.die2) % 6) + 1;
-              setThrownDiceFaces({
-                die1: d1,
-                die2: d2,
-                total: d1 + d2,
-                isDoubles: d1 === d2,
-              });
-            }, 72);
+            setThrownDiceFaces(realDice);
 
             diceSettleTimerRef.current = window.setTimeout(() => {
-              if (diceIntervalRef.current !== null) {
-                window.clearInterval(diceIntervalRef.current);
-                diceIntervalRef.current = null;
-              }
-              setThrownDiceFaces(realDice);
               setIsThrowingDice(false);
-            }, 520);
+            }, 900);
 
             diceHideTimerRef.current = window.setTimeout(() => {
               setShowThrownDiceOverlay(false);
-            }, 1550);
+            }, 2200);
           }
           break;
         }
@@ -544,7 +597,12 @@ export default function App() {
         case 'RENT':
         case 'TAX':
         case 'PASS_START': {
-          soundFX.playCashChing();
+          if (isWalkInProgress) {
+            pendingWalkSoundsRef.current.push('cash');
+          } else {
+            soundFX.playCashChing();
+          }
+
           if (entry.amount && entry.amount > 0) {
             const actor = entry.actorId
               ? gameState.players.find((p) => p.id === entry.actorId)
@@ -563,7 +621,7 @@ export default function App() {
                     recipientId: target?.id,
                     payerTileIndex: entry.tileIndex ?? actor?.position,
                     recipientTileIndex: target?.position,
-                    message: `${actor?.name ?? 'ผู้เล่น'} จ่ายค่าเช่า ฿${formatBahtNumber(entry.amount)} ให้ ${target?.name ?? 'เจ้าของโฉนด'}`,
+                    message: `💸 ${actor?.name ?? 'ผู้เล่น'} จ่ายค่าเช่า -฿${formatBahtNumber(entry.amount)} → ${target?.name ?? 'เจ้าของโฉนด'}`,
                   }
                 : entry.type === 'TAX'
                   ? {
@@ -572,7 +630,7 @@ export default function App() {
                       amount: entry.amount,
                       payerId: actor?.id,
                       payerTileIndex: entry.tileIndex ?? actor?.position,
-                      message: `${actor?.name ?? 'ผู้เล่น'} จ่ายภาษี ฿${formatBahtNumber(entry.amount)}`,
+                      message: `💸 ${actor?.name ?? 'ผู้เล่น'} จ่ายภาษี -฿${formatBahtNumber(entry.amount)} ให้ธนาคาร`,
                     }
                   : {
                       key: entry.seq,
@@ -580,14 +638,14 @@ export default function App() {
                       amount: entry.amount,
                       recipientId: actor?.id,
                       recipientTileIndex: 0,
-                      message: `${actor?.name ?? 'ผู้เล่น'} ผ่านจุดเริ่มต้น รับ ฿${formatBahtNumber(entry.amount)}`,
+                      message: `✨ ${actor?.name ?? 'ผู้เล่น'} ผ่านจุดเริ่มต้น รับ +฿${formatBahtNumber(entry.amount)}`,
                     };
 
-            if (cashFxTimerRef.current !== null) window.clearTimeout(cashFxTimerRef.current);
-            setCashTransferFx(fx);
-            cashFxTimerRef.current = window.setTimeout(() => {
-              setCashTransferFx(null);
-            }, 2200);
+            if (isWalkInProgress) {
+              pendingWalkCashFxRef.current = fx;
+            } else {
+              triggerCashTransferFx(fx);
+            }
 
             if (myPlayerId && !isSpectator) {
               let deltaForMe = 0;
@@ -600,13 +658,12 @@ export default function App() {
                 deltaForMe = entry.amount;
               }
               if (deltaForMe !== 0) {
-                if (cashDeltaTimerRef.current !== null) {
-                  window.clearTimeout(cashDeltaTimerRef.current);
+                const deltaObj = { amount: deltaForMe, key: entry.seq };
+                if (isWalkInProgress) {
+                  pendingWalkCashDeltaRef.current = deltaObj;
+                } else {
+                  triggerCashDelta(deltaObj);
                 }
-                setMyCashDelta({ amount: deltaForMe, key: entry.seq });
-                cashDeltaTimerRef.current = window.setTimeout(() => {
-                  setMyCashDelta(null);
-                }, 2000);
               }
             }
           }
@@ -622,19 +679,21 @@ export default function App() {
           break;
         case 'CARD_CHANCE':
         case 'CARD_CHEST':
-          soundFX.playCardFlip();
+          if (isWalkInProgress) pendingWalkSoundsRef.current.push('card');
+          else soundFX.playCardFlip();
           break;
         case 'JAIL':
-          soundFX.playJailBuzzer();
+          if (isWalkInProgress) pendingWalkSoundsRef.current.push('jail');
+          else soundFX.playJailBuzzer();
           break;
         case 'GAME_OVER':
           soundFX.playFanfare();
           break;
       }
     }
-  }, [gameState, myPlayerId, isSpectator]);
+  }, [gameState, myPlayerId, isSpectator, triggerCashDelta, triggerCashTransferFx]);
 
-  // Trigger CardRevealModal when a new card is drawn
+  // Trigger CardRevealModal when a new card is drawn (deferred until walk reaches deck tile)
   useEffect(() => {
     const drawn = gameState?.lastCardDrawn;
     if (!drawn) {
@@ -649,7 +708,12 @@ export default function App() {
     }
     if (lastCardKeyRef.current !== key) {
       lastCardKeyRef.current = key;
-      setRevealedCard(drawn);
+      if (hopTimerRef.current !== null) {
+        pendingCardRevealRef.current = drawn;
+      } else {
+        setActiveCardDraw({ deck: drawn.card.deck, key: Date.now() });
+        setRevealedCard(drawn);
+      }
     }
   }, [gameState?.lastCardDrawn]);
 
@@ -851,6 +915,7 @@ export default function App() {
                 isThrowingDice={isThrowingDice}
                 throwKey={throwKey}
                 thrownDiceFaces={thrownDiceFaces}
+                activeCardDraw={activeCardDraw}
               />
 
               {/* True Floating Hearthstone/UNO Deed Hand overlapping bottom edge of 3D stage */}
@@ -1161,7 +1226,14 @@ export default function App() {
                 ? gameState.players.find((p) => p.id === revealedCard.playerId)
                 : undefined
             }
-            onClose={() => setRevealedCard(null)}
+            onClose={() => {
+              setRevealedCard(null);
+              if (postCardAutoTileRef.current !== null) {
+                const nextTile = postCardAutoTileRef.current;
+                postCardAutoTileRef.current = null;
+                setSelectedTileIndex(nextTile);
+              }
+            }}
           />
 
           <GameOverModal

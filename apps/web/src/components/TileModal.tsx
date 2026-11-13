@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  calculateRent,
   canBuildOnCurrentTile,
   canMortgageTile,
   canSellHouseOnTile,
@@ -60,6 +61,12 @@ export function TileModal({
   );
   const isOpponentDeed = Boolean(deed?.ownerId && deed.ownerId !== myPlayerId);
   const isMyDeed = Boolean(deed?.ownerId && deed.ownerId === myPlayerId);
+  const currentTileRent = deed ? calculateRent(gameState, tile.index, gameState.lastDice?.total ?? 7) : 0;
+  const isInDebtMode = Boolean(
+    isMyTurn &&
+      gameState.phase === 'AWAIT_DEBT_RESOLUTION' &&
+      gameState.pendingDebt?.debtorId === myPlayerId,
+  );
 
   const buildCheck = isMyTurn && isStandingHere
     ? canBuildOnCurrentTile(gameState, myPlayerId!)
@@ -131,6 +138,14 @@ export function TileModal({
         </div>
 
         <div className="space-y-4 p-4">
+          {/* Debt Liquidation Guidance when clicking own cards during AWAIT_DEBT_RESOLUTION */}
+          {isInDebtMode && isMyDeed && gameState.pendingDebt && (
+            <div className="rounded-xl border-2 border-rose-600/60 bg-rose-100/95 px-3 py-2 text-xs font-bold text-rose-950">
+              ค้างชำระ ฿{formatBahtNumber(gameState.pendingDebt.amount)} ({gameState.pendingDebt.reason}) —
+              สามารถกดขายสิ่งปลูกสร้างหรือจำนองโฉนดนี้ด้านล่างเพื่อหาเงินมาจ่ายได้
+            </div>
+          )}
+
           {/* Contextual Arrival Callout Banner */}
           {isMyTurn && isStandingHere && deed && (
             <div
@@ -155,7 +170,9 @@ export function TileModal({
                   โฉนดของ {owner.name}
                   {deed.isMortgaged
                     ? ' (ติดจำนองอยู่ — ไม่ต้องจ่ายค่าเช่า)'
-                    : ' — ต้องจ่ายค่าเช่าตามระดับสิ่งปลูกสร้าง'}
+                    : isInDebtMode
+                      ? ` — เงินสดไม่พอจ่ายค่าเช่า ฿${formatBahtNumber(gameState.pendingDebt?.amount ?? currentTileRent)}! กรุณาขายบ้านหรือจำนองโฉนด`
+                      : ` — ชำระค่าเช่า -฿${formatBahtNumber(currentTileRent)} แล้ว`}
                 </span>
               )}
               {isMyDeed && (

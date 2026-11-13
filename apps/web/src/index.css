@@ -475,8 +475,9 @@
     0 2px 4px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.65);
   transition:
-    transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 240ms ease,
+    transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 260ms ease,
     filter 200ms ease;
   will-change: transform;
 }
@@ -484,12 +485,38 @@
 .deed-fan-card:hover,
 .deed-fan-card:focus-visible,
 .deed-fan-card[data-selected='true'] {
-  transform: rotate(0deg) translateY(-36px) scale(1.14) !important;
+  transform: rotate(0deg) translateY(-42px) scale(1.15) !important;
   z-index: 80 !important;
   box-shadow:
-    0 20px 36px -6px rgba(0, 0, 0, 0.62),
+    0 24px 40px -6px rgba(0, 0, 0, 0.68),
     0 0 0 2px #facc15,
     inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+/* 3D Card Draw Out-of-Deck & Flip-to-Front Animation */
+@keyframes card-draw-flip {
+  0% {
+    opacity: 0;
+    transform: perspective(1200px) translateY(96px) scale(0.52) rotateY(180deg) rotateZ(-8deg);
+  }
+  38% {
+    opacity: 1;
+    transform: perspective(1200px) translateY(-10px) scale(1.04) rotateY(180deg) rotateZ(2deg);
+  }
+  74% {
+    opacity: 1;
+    transform: perspective(1200px) translateY(0px) scale(1.02) rotateY(-10deg) rotateZ(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(1200px) translateY(0px) scale(1) rotateY(0deg) rotateZ(0deg);
+  }
+}
+
+.animate-card-draw-flip {
+  animation: card-draw-flip 780ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transform-style: preserve-3d;
+  will-change: transform, opacity;
 }
 
 .deed-foil-shimmer {

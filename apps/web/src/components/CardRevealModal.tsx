@@ -33,7 +33,8 @@ export function CardRevealModal({ drawnCard, player, onClose }: CardRevealModalP
       aria-label={isChance ? 'การ์ดประตูดวง' : 'การ์ดหีบสมบัติ'}
     >
       <div
-        className={`deed-card-bevel relative w-full max-w-sm overflow-hidden rounded-2xl border-4 text-[#1c1814] shadow-2xl ${
+        key={`${drawnCard.turnNumber}-${drawnCard.card.id}`}
+        className={`animate-card-draw-flip deed-card-bevel relative w-full max-w-sm overflow-hidden rounded-2xl border-4 text-[#1c1814] shadow-2xl ${
           isChance
             ? 'border-[#c8232c] bg-[#fdf6e2]'
             : 'border-[#c59c22] bg-[#f7eed3]'
@@ -46,10 +47,15 @@ export function CardRevealModal({ drawnCard, player, onClose }: CardRevealModalP
           }`}
         >
           <div className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5" />
-            <span className="font-[var(--font-display)] text-lg font-extrabold">
-              {isChance ? 'ประตูดวง' : 'หีบสมบัติ'}
-            </span>
+            <Sparkles className="h-5 w-5 animate-pulse" />
+            <div className="flex flex-col leading-tight">
+              <span className="text-[10px] font-bold tracking-wider text-white/80 uppercase">
+                จั่วการ์ดออกจากกอง
+              </span>
+              <span className="font-[var(--font-display)] text-lg font-extrabold">
+                {isChance ? 'ประตูดวง' : 'หีบสมบัติ'}
+              </span>
+            </div>
           </div>
           <button
             type="button"
@@ -86,11 +92,11 @@ export function CardRevealModal({ drawnCard, player, onClose }: CardRevealModalP
           <button
             type="button"
             onClick={onClose}
-            className={`tactile-btn mt-4 w-full rounded-xl px-4 py-2.5 font-bold text-white shadow ${
+            className={`tactile-btn mt-4 w-full rounded-xl px-4 py-2.5 font-extrabold text-white shadow ${
               isChance ? 'bg-[#c8232c]' : 'bg-[#b37412]'
             }`}
           >
-            รับทราบ
+            ดำเนินการต่อ
           </button>
         </div>
       </div>

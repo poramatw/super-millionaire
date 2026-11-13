@@ -37,6 +37,7 @@ export interface BoardProps {
   isThrowingDice: boolean;
   throwKey: number;
   thrownDiceFaces: DiceRollResult | null;
+  activeCardDraw?: { deck: 'chance' | 'chest'; key: number } | null;
 }
 
 export function Board({
@@ -52,6 +53,7 @@ export function Board({
   isThrowingDice,
   throwKey,
   thrownDiceFaces,
+  activeCardDraw = null,
 }: BoardProps) {
   const [cameraMode, setCameraMode] = useState<'isometric' | 'topdown'>('isometric');
   const [followActiveToken, setFollowActiveToken] = useState(true);
@@ -88,6 +90,7 @@ export function Board({
           isThrowingDice={isThrowingDice}
           throwKey={throwKey}
           thrownDiceFaces={thrownDiceFaces}
+          activeCardDraw={activeCardDraw}
         />
 
         {/* Top Floating Bar: Turn Status + 3D Camera Controls */}
@@ -159,12 +162,12 @@ export function Board({
             className="pointer-events-none absolute top-13 left-1/2 z-30 w-max max-w-[92%] -translate-x-1/2 sm:top-12"
           >
             <div
-              className={`rounded-full border px-3.5 py-1 text-center text-xs font-extrabold shadow-xl backdrop-blur-md sm:text-sm ${
+              className={`animate-cash-gain rounded-full border-2 px-4 py-1.5 text-center text-xs font-extrabold shadow-2xl backdrop-blur-md sm:text-sm ${
                 cashTransferFx.kind === 'PASS_START'
-                  ? 'border-emerald-300 bg-emerald-950/90 text-emerald-100'
+                  ? 'border-emerald-300 bg-emerald-900/95 text-emerald-50 ring-2 ring-emerald-400/50'
                   : cashTransferFx.kind === 'TAX'
-                    ? 'border-rose-300 bg-rose-950/90 text-rose-100'
-                    : 'border-amber-300 bg-stone-950/92 text-amber-100'
+                    ? 'border-rose-300 bg-rose-900/95 text-rose-50 ring-2 ring-rose-400/50'
+                    : 'border-amber-300 bg-stone-950/95 text-amber-100 ring-2 ring-amber-400/60'
               }`}
             >
               {cashTransferFx.message}

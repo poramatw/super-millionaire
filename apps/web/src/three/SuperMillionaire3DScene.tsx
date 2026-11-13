@@ -40,6 +40,7 @@ export interface SuperMillionaire3DSceneProps {
   isThrowingDice: boolean;
   throwKey: number;
   thrownDiceFaces: DiceRollResult | null;
+  activeCardDraw?: { deck: 'chance' | 'chest'; key: number } | null;
 }
 
 interface TokenRuntime {
@@ -146,6 +147,10 @@ function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+function easeOutQuart(t: number): number {
+  return 1 - Math.pow(1 - t, 4);
+}
+
 function lerpAngle(current: number, target: number, alpha: number): number {
   let diff = ((target - current + Math.PI) % (Math.PI * 2)) - Math.PI;
   if (diff < -Math.PI) diff += Math.PI * 2;
@@ -177,8 +182,18 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     hoverRing: THREE.Mesh;
     die1Mesh: THREE.Mesh;
     die2Mesh: THREE.Mesh;
+    chestDeckGroup: THREE.Group;
+    chanceDeckGroup: THREE.Group;
+    deckDrawFx: {
+      active: boolean;
+      deck: 'chance' | 'chest';
+      startMs: number;
+      durationMs: number;
+      lastKey: number;
+    };
     diceThrow: DiceThrowState;
     cameraLerp: { active: boolean; targetPos: THREE.Vector3; targetLook: THREE.Vector3 };
+    userManualOverride: boolean;
     lastBuildKey: number;
     lastCashFxKey: number;
     lastThrowKey: number;
@@ -446,10 +461,19 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
       hoverRing,
       die1Mesh: die1.mesh,
       die2Mesh: die2.mesh,
+      chestDeckGroup: chestDeck.group,
+      chanceDeckGroup: chanceDeck.group,
+      deckDrawFx: {
+        active: false,
+        deck: 'chance' as 'chance' | 'chest',
+        startMs: 0,
+        durationMs: 720,
+        lastKey: -1,
+      },
       diceThrow: {
         active: false,
         startMs: 0,
-        durationMs: 680,
+        durationMs: 940,
         die1Target: new THREE.Euler(0, 0.25, 0),
         die2Target: new THREE.Euler(0, -0.32, 0),
         die1Start: new THREE.Euler(),
@@ -460,15 +484,17 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         targetPos: new THREE.Vector3(0, 11.5, 11.2),
         targetLook: new THREE.Vector3(0, 0, 0),
       },
+      userManualOverride: false,
       lastBuildKey: -1,
       lastCashFxKey: -1,
       lastThrowKey: 0,
     };
     sceneBundleRef.current = bundle;
 
-    // Cancel auto camera lerp as soon as user drags/zooms manually
+    // Cancel auto camera lerp/follow as soon as user manually drags or zooms
     const onControlStart = () => {
       bundle.cameraLerp.active = false;
+      bundle.userManualOverride = true;
     };
     controls.addEventListener('start', onControlStart);
 
@@ -595,39 +621,44 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         }
       });
 
-      // 3. Animate 3D Dice Throw & Bounce
+      // 3. Smooth Continuous 3D Dice Throw & Natural 3-Bounce Physics
       if (bundle.diceThrow.active) {
         const elapsed = now - bundle.diceThrow.startMs;
         const progress = Math.min(1, elapsed / bundle.diceThrow.durationMs);
-        const ease = easeInOutCubic(progress);
+        const posEase = easeOutQuart(progress);
+        const rotEase = easeOutQuart(Math.min(1, progress * 1.06));
 
-        // Parabolic 2-bounce height
-        const bounce =
-          progress < 0.65
-            ? Math.sin((progress / 0.65) * Math.PI) * 1.55
-            : Math.sin(((progress - 0.65) / 0.35) * Math.PI) * 0.42;
+        // 3 damped parabolic table bounces
+        let bounce = 0;
+        if (progress < 0.5) {
+          bounce = Math.sin((progress / 0.5) * Math.PI) * 1.75;
+        } else if (progress < 0.8) {
+          bounce = Math.sin(((progress - 0.5) / 0.3) * Math.PI) * 0.58;
+        } else {
+          bounce = Math.sin(((progress - 0.8) / 0.2) * Math.PI) * 0.16;
+        }
 
         bundle.die1Mesh.position.set(
-          THREE.MathUtils.lerp(-1.8, -0.52, ease),
+          THREE.MathUtils.lerp(-2.1, -0.52, posEase),
           0.26 + bounce,
-          THREE.MathUtils.lerp(2.2, 0.36, ease),
+          THREE.MathUtils.lerp(2.4, 0.36, posEase),
         );
         bundle.die2Mesh.position.set(
-          THREE.MathUtils.lerp(1.8, 0.52, ease),
-          0.26 + bounce * 0.92,
-          THREE.MathUtils.lerp(2.2, -0.26, ease),
+          THREE.MathUtils.lerp(2.1, 0.52, posEase),
+          0.26 + bounce * 0.94,
+          THREE.MathUtils.lerp(2.2, -0.26, posEase),
         );
 
-        const spinFactor = 1 - ease;
+        const spinDecay = 1 - rotEase;
         bundle.die1Mesh.rotation.set(
-          bundle.diceThrow.die1Target.x + spinFactor * Math.PI * 4,
-          0.28 + spinFactor * Math.PI * 3,
-          bundle.diceThrow.die1Target.z + spinFactor * Math.PI * 2,
+          bundle.diceThrow.die1Target.x + spinDecay * Math.PI * 6,
+          0.28 + spinDecay * Math.PI * 4,
+          bundle.diceThrow.die1Target.z + spinDecay * Math.PI * 4,
         );
         bundle.die2Mesh.rotation.set(
-          bundle.diceThrow.die2Target.x - spinFactor * Math.PI * 4,
-          -0.32 - spinFactor * Math.PI * 3,
-          bundle.diceThrow.die2Target.z + spinFactor * Math.PI * 2,
+          bundle.diceThrow.die2Target.x - spinDecay * Math.PI * 6,
+          -0.32 - spinDecay * Math.PI * 4,
+          bundle.diceThrow.die2Target.z + spinDecay * Math.PI * 4,
         );
 
         if (progress >= 1) {
@@ -647,6 +678,22 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         }
       }
 
+      // 3b. Animate 3D Deck Pulse when drawing Chance / Chest card
+      if (bundle.deckDrawFx.active) {
+        const p = Math.min(1, (now - bundle.deckDrawFx.startMs) / bundle.deckDrawFx.durationMs);
+        const deckGroup =
+          bundle.deckDrawFx.deck === 'chance' ? bundle.chanceDeckGroup : bundle.chestDeckGroup;
+        const lift = Math.sin(p * Math.PI) * 0.65;
+        const popScale = 1 + Math.sin(p * Math.PI) * 0.22;
+        deckGroup.position.y = lift;
+        deckGroup.scale.setScalar(popScale);
+        if (p >= 1) {
+          bundle.deckDrawFx.active = false;
+          deckGroup.position.y = 0;
+          deckGroup.scale.setScalar(1);
+        }
+      }
+
       // 4. Animate Flying 3D Gold Coins
       for (let i = bundle.flyingCoins.length - 1; i >= 0; i--) {
         const coin = bundle.flyingCoins[i];
@@ -660,11 +707,11 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         const eased = easeInOutCubic(p);
         coin.group.position.set(
           THREE.MathUtils.lerp(coin.startX, coin.endX, eased),
-          0.35 + Math.sin(p * Math.PI) * 1.9,
+          0.42 + Math.sin(p * Math.PI) * 2.35,
           THREE.MathUtils.lerp(coin.startZ, coin.endZ, eased),
         );
-        coin.group.rotation.y += 0.24;
-        const scale = p > 0.82 ? Math.max(0.1, (1 - p) / 0.18) : 1;
+        coin.group.rotation.y += 0.28;
+        const scale = (p > 0.84 ? Math.max(0.15, (1 - p) / 0.16) : 1) * 1.24;
         coin.group.scale.setScalar(scale);
 
         if (p >= 1) {
@@ -679,7 +726,7 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         bundle.spotlightRing.scale.set(pulse, pulse, 1);
       }
 
-      // 6. Smooth Camera Lerp & Gentle Active Token Tracking
+      // 6. Smooth Camera Lerp & Active/Next Player Zoom-In Focus
       if (bundle.cameraLerp.active) {
         camera.position.lerp(bundle.cameraLerp.targetPos, 0.09);
         controls.target.lerp(bundle.cameraLerp.targetLook, 0.1);
@@ -689,15 +736,31 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         ) {
           bundle.cameraLerp.active = false;
         }
-      } else if (currentProps.followActiveToken && currentProps.animatingPlayerId) {
-        const movingToken = bundle.tokens.get(currentProps.animatingPlayerId);
-        if (movingToken) {
-          const desiredTarget = new THREE.Vector3(
-            movingToken.root.position.x * 0.36,
-            0,
-            movingToken.root.position.z * 0.36,
-          );
-          controls.target.lerp(desiredTarget, 0.08);
+      } else if (
+        currentProps.followActiveToken &&
+        currentProps.cameraMode === 'isometric' &&
+        !bundle.userManualOverride
+      ) {
+        if (bundle.diceThrow.active) {
+          // Brief center framing so both bouncing dice are clearly visible
+          camera.position.lerp(new THREE.Vector3(0, 9.6, 8.9), 0.08);
+          controls.target.lerp(new THREE.Vector3(0, 0.1, 0), 0.1);
+        } else {
+          const focusId = currentProps.animatingPlayerId ?? currentPlayer?.id;
+          const focusToken = focusId ? bundle.tokens.get(focusId) : undefined;
+          if (focusToken) {
+            const tx = focusToken.root.position.x;
+            const tz = focusToken.root.position.z;
+            const desiredTarget = new THREE.Vector3(tx * 0.62, 0.22, tz * 0.62);
+            const zoomHeight = currentProps.animatingPlayerId ? 6.8 : 7.5;
+            const desiredCam = new THREE.Vector3(
+              tx * 0.62,
+              zoomHeight,
+              tz * 0.62 + 7.1,
+            );
+            controls.target.lerp(desiredTarget, 0.075);
+            camera.position.lerp(desiredCam, 0.06);
+          }
         }
       }
 
@@ -976,33 +1039,58 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     }
   }, [props.selectedTileIndex, props.hopSpotlightTile]);
 
-  // Trigger 3D Dice Throw Animation
+  // Trigger 3D Dice Throw Animation (single continuous throw per throwKey; no 72ms restarts!)
   useEffect(() => {
     const bundle = sceneBundleRef.current;
     if (!bundle) return;
 
-    const faces = props.thrownDiceFaces ?? props.gameState.lastDice;
+    const faces = props.gameState.lastDice ?? props.thrownDiceFaces;
     const d1 = faces?.die1 ?? 1;
     const d2 = faces?.die2 ?? 1;
     const target1 = getDiceTargetEuler(d1);
     const target2 = getDiceTargetEuler(d2);
 
-    if (props.throwKey !== bundle.lastThrowKey || props.isThrowingDice) {
+    if (props.throwKey > 0 && props.throwKey !== bundle.lastThrowKey) {
       bundle.lastThrowKey = props.throwKey;
+      bundle.userManualOverride = false;
       bundle.diceThrow = {
         active: true,
         startMs: performance.now(),
-        durationMs: 680,
+        durationMs: 940,
         die1Target: target1,
         die2Target: target2,
         die1Start: bundle.die1Mesh.rotation.clone(),
         die2Start: bundle.die2Mesh.rotation.clone(),
       };
+    } else if (bundle.diceThrow.active) {
+      bundle.diceThrow.die1Target = target1;
+      bundle.diceThrow.die2Target = target2;
     } else {
       bundle.die1Mesh.rotation.set(target1.x, 0.28, target1.z);
       bundle.die2Mesh.rotation.set(target2.x, -0.32, target2.z);
     }
-  }, [props.throwKey, props.isThrowingDice, props.thrownDiceFaces, props.gameState.lastDice]);
+  }, [props.throwKey, props.gameState.lastDice, props.thrownDiceFaces]);
+
+  // Trigger 3D Deck Lift Pulse when Chance/Chest Card Draws
+  useEffect(() => {
+    const bundle = sceneBundleRef.current;
+    if (!bundle || !props.activeCardDraw) return;
+    if (props.activeCardDraw.key === bundle.deckDrawFx.lastKey) return;
+    bundle.deckDrawFx = {
+      active: true,
+      deck: props.activeCardDraw.deck,
+      startMs: performance.now(),
+      durationMs: 720,
+      lastKey: props.activeCardDraw.key,
+    };
+  }, [props.activeCardDraw]);
+
+  // Re-engage active player zoom-in focus when turn advances or follow toggled on
+  useEffect(() => {
+    const bundle = sceneBundleRef.current;
+    if (!bundle) return;
+    bundle.userManualOverride = false;
+  }, [props.gameState.currentTurnIndex, props.gameState.turnNumber, props.followActiveToken]);
 
   // Trigger Flying 3D Gold Coins on Cash Transfer FX
   useEffect(() => {
@@ -1020,19 +1108,19 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         ? tileIndexToWorldXZ(props.cashTransferFx.recipientTileIndex)
         : { x: 0, z: 0 };
 
-    const coinCount = 4;
+    const coinCount = 7;
     const baseNow = performance.now();
     for (let i = 0; i < coinCount; i++) {
       const coinGroup = new THREE.Group();
-      const jitterX = (i - 1.5) * 0.14;
-      const jitterZ = ((i % 2) - 0.5) * 0.14;
-      coinGroup.position.set(startCoords.x + jitterX, 0.35, startCoords.z + jitterZ);
+      const jitterX = ((i % 3) - 1) * 0.16;
+      const jitterZ = (Math.floor(i / 3) - 1) * 0.16;
+      coinGroup.position.set(startCoords.x + jitterX, 0.42, startCoords.z + jitterZ);
       coinGroup.visible = false;
 
-      const fallback = createFallbackModel('coin', 0.34);
+      const fallback = createFallbackModel('coin', 0.4);
       coinGroup.add(fallback);
 
-      loadNormalizedGLB(MODEL_URLS.coin, 0.34)
+      loadNormalizedGLB(MODEL_URLS.coin, 0.4)
         .then((model) => {
           if (!coinGroup.parent) return;
           coinGroup.remove(fallback);
@@ -1049,8 +1137,8 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         startZ: startCoords.z + jitterZ,
         endX: endCoords.x,
         endZ: endCoords.z,
-        startMs: baseNow + i * 75,
-        durationMs: 820,
+        startMs: baseNow + i * 65,
+        durationMs: 960,
       });
     }
   }, [props.cashTransferFx]);
@@ -1060,6 +1148,7 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     const bundle = sceneBundleRef.current;
     if (!bundle) return;
 
+    bundle.userManualOverride = false;
     bundle.cameraLerp = {
       active: true,
       targetPos:
