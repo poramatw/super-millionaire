@@ -20,6 +20,7 @@ import {
   type RoomState,
   type ServerToClientEvents,
 } from '@super-millionaire/shared';
+import { PeerRoomClient, PeerRoomHost } from './peerRoomTransport';
 
 type ExtendedClientToServerEvents = ClientToServerEvents & {
   'room:resetLobby': (
@@ -31,6 +32,7 @@ type ExtendedClientToServerEvents = ClientToServerEvents & {
 type GameSocket = Socket<ServerToClientEvents, ExtendedClientToServerEvents>;
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
+export type TransportMode = 'socket' | 'p2p';
 
 const SESSION_TOKEN_KEY = 'sm_9028_session_token';
 const LAST_ROOM_KEY = 'sm_9028_last_room';
@@ -220,6 +222,7 @@ export interface UseSocketGameResult {
   roomState: RoomState | null;
   gameState: GameState | null;
   connectionStatus: ConnectionStatus;
+  transportMode: TransportMode;
   isLocalOffline: boolean;
   mySeatIndex: number | null;
   myPlayerId: string | null;
@@ -255,11 +258,14 @@ export function useSocketGame(): UseSocketGameResult {
   const currentRoomIdRef = useRef<string | null>(null);
   const creatorRoomIdRef = useRef<string | null>(readStoredHostRoom());
   const localBotTimerRef = useRef<number | null>(null);
+  const peerHostRef = useRef<PeerRoomHost | null>(null);
+  const peerClientRef = useRef<PeerRoomClient | null>(null);
 
   const [roomState, setRoomState] = useState<RoomState | null>(null);
   const [standaloneGameState, setStandaloneGameState] = useState<GameState | null>(null);
   const [localRoomState, setLocalRoomState] = useState<RoomState | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
+  const [transportMode, setTransportMode] = useState<TransportMode>('socket');
   const [mySeatIndex, setMySeatIndex] = useState<number | null>(null);
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [isSpectator, setIsSpectator] = useState(false);
@@ -286,14 +292,16 @@ export function useSocketGame(): UseSocketGameResult {
 
   useEffect(() => {
     const socketUrl = getConfiguredSocketUrl();
+    const hasExplicitSocket = Boolean(socketUrl);
     const socketOptions = {
       path: '/socket.io',
       auth: {
         sessionToken: sessionTokenRef.current,
       },
       transports: ['websocket', 'polling'] as ('websocket' | 'polling')[],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
+      reconnection: hasExplicitSocket,
+      reconnectionAttempts: hasExplicitSocket ? Infinity : 0,
+      timeout: hasExplicitSocket ? 8000 : 1800,
       reconnectionDelay: 800,
       reconnectionDelayMax: 4000,
     };
@@ -303,8 +311,11 @@ export function useSocketGame(): UseSocketGameResult {
       : io(socketOptions);
 
     socketRef.current = socket;
+    let connectedOnce = false;
 
     socket.on('connect', () => {
+      connectedOnce = true;
+      setTransportMode('socket');
       setConnectionStatus('connected');
 
       // Rebind active room on socket connect / reconnect
@@ -329,11 +340,21 @@ export function useSocketGame(): UseSocketGameResult {
     });
 
     socket.on('disconnect', () => {
-      setConnectionStatus('disconnected');
+      if (connectedOnce || hasExplicitSocket) {
+        setConnectionStatus('disconnected');
+      }
     });
 
     socket.on('connect_error', () => {
-      setConnectionStatus('error');
+      if (!connectedOnce && !hasExplicitSocket) {
+        // Static hosting (e.g. Vercel without separate backend) -> switch seamlessly to WebRTC P2P online rooms!
+        socket.disconnect();
+        socketRef.current = null;
+        setTransportMode('p2p');
+        setConnectionStatus('connected');
+      } else {
+        setConnectionStatus('error');
+      }
     });
 
     socket.on('room:state', (room) => {
@@ -379,6 +400,10 @@ export function useSocketGame(): UseSocketGameResult {
       if (errorTimerRef.current !== null) {
         window.clearTimeout(errorTimerRef.current);
       }
+      peerHostRef.current?.destroy();
+      peerHostRef.current = null;
+      peerClientRef.current?.destroy();
+      peerClientRef.current = null;
       socket.disconnect();
       socketRef.current = null;
     };
@@ -513,70 +538,19 @@ export function useSocketGame(): UseSocketGameResult {
   );
 
   const createRoom = useCallback(
-    (playerName: string, config?: Partial<RoomConfig>): Promise<RoomJoinAck> => {
-      return new Promise((resolve) => {
-        const socket = socketRef.current;
-        if (!socket || !socket.connected) {
-          // Seamless Vercel / offline fallback to local browser vs AI bots
-          resolve(startLocalGame(playerName, config));
-          return;
-        }
-        const trimmedName = playerName.trim() || 'เจ้าบ้าน';
-        saveStoredPlayerName(trimmedName);
+    async (playerName: string, config?: Partial<RoomConfig>): Promise<RoomJoinAck> => {
+      const socket = socketRef.current;
+      if (socket && socket.connected) {
+        return new Promise((resolve) => {
+          const trimmedName = playerName.trim() || 'เจ้าบ้าน';
+          saveStoredPlayerName(trimmedName);
 
-        socket.emit('room:create', { playerName: trimmedName, config }, (ack) => {
-          if (ack.ok && ack.roomId) {
-            setLocalRoomState(null);
-            currentRoomIdRef.current = ack.roomId;
-            creatorRoomIdRef.current = ack.roomId;
-            saveStoredHostRoom(ack.roomId);
-            saveStoredRoomId(ack.roomId);
-            syncRoomUrlParam(ack.roomId);
-            setMySeatIndex(ack.seatIndex ?? null);
-            setMyPlayerId(ack.playerId ?? null);
-            setIsSpectator(Boolean(ack.isSpectator));
-            clearError();
-          } else if (ack.error) {
-            showError(ack.error);
-          }
-          resolve(ack);
-        });
-      });
-    },
-    [clearError, showError, startLocalGame],
-  );
-
-  const joinRoom = useCallback(
-    (
-      roomId: string,
-      playerName: string,
-      preferredSeatIndex?: number,
-      asSpectator?: boolean,
-    ): Promise<RoomJoinAck> => {
-      return new Promise((resolve) => {
-        const socket = socketRef.current;
-        if (!socket || !socket.connected) {
-          const msg = 'เซิร์ฟเวอร์ออนไลน์ไม่พร้อมใช้งาน สามารถเลือก "เล่นทันทีบนเบราว์เซอร์ (AI บอท)" ได้เลย!';
-          showError(msg);
-          resolve({ ok: false, error: msg });
-          return;
-        }
-        const normalizedRoomId = roomId.trim().toUpperCase();
-        const trimmedName = playerName.trim() || 'ผู้เล่น';
-        saveStoredPlayerName(trimmedName);
-
-        socket.emit(
-          'room:join',
-          {
-            roomId: normalizedRoomId,
-            playerName: trimmedName,
-            preferredSeatIndex,
-            asSpectator,
-          },
-          (ack) => {
+          socket.emit('room:create', { playerName: trimmedName, config }, (ack) => {
             if (ack.ok && ack.roomId) {
               setLocalRoomState(null);
               currentRoomIdRef.current = ack.roomId;
+              creatorRoomIdRef.current = ack.roomId;
+              saveStoredHostRoom(ack.roomId);
               saveStoredRoomId(ack.roomId);
               syncRoomUrlParam(ack.roomId);
               setMySeatIndex(ack.seatIndex ?? null);
@@ -587,11 +561,178 @@ export function useSocketGame(): UseSocketGameResult {
               showError(ack.error);
             }
             resolve(ack);
+          });
+        });
+      }
+
+      if (transportMode === 'p2p') {
+        peerHostRef.current?.destroy();
+        peerHostRef.current = null;
+        peerClientRef.current?.destroy();
+        peerClientRef.current = null;
+
+        const trimmedName = playerName.trim() || 'เจ้าบ้าน';
+        saveStoredPlayerName(trimmedName);
+
+        const { host, ack } = await PeerRoomHost.create({
+          sessionToken: sessionTokenRef.current,
+          playerName: trimmedName,
+          config,
+          callbacks: {
+            onRoomChange: (room, entries) => {
+              setLocalRoomState(null);
+              setRoomState(room);
+              setStandaloneGameState(room.gameState);
+              if (entries && entries.length > 0) {
+                setLastActionEntries(entries);
+              }
+            },
+            onError: (msg) => showError(msg),
           },
-        );
-      });
+        });
+
+        if (ack.ok && ack.roomId) {
+          peerHostRef.current = host;
+          currentRoomIdRef.current = ack.roomId;
+          creatorRoomIdRef.current = ack.roomId;
+          saveStoredHostRoom(ack.roomId);
+          saveStoredRoomId(ack.roomId);
+          syncRoomUrlParam(ack.roomId);
+          setMySeatIndex(ack.seatIndex ?? null);
+          setMyPlayerId(ack.playerId ?? null);
+          setIsSpectator(Boolean(ack.isSpectator));
+          clearError();
+          return ack;
+        }
+        if (ack.error) showError(ack.error);
+        return ack;
+      }
+
+      // Offline fallback if neither Socket.IO nor P2P ready yet
+      return startLocalGame(playerName, config);
     },
-    [clearError, showError],
+    [clearError, showError, startLocalGame, transportMode],
+  );
+
+  const joinRoom = useCallback(
+    async (
+      roomId: string,
+      playerName: string,
+      preferredSeatIndex?: number,
+      asSpectator?: boolean,
+    ): Promise<RoomJoinAck> => {
+      const normalizedRoomId = roomId.trim().toUpperCase();
+      const trimmedName = playerName.trim() || 'ผู้เล่น';
+      saveStoredPlayerName(trimmedName);
+
+      const socket = socketRef.current;
+      if (socket && socket.connected) {
+        return new Promise((resolve) => {
+          socket.emit(
+            'room:join',
+            {
+              roomId: normalizedRoomId,
+              playerName: trimmedName,
+              preferredSeatIndex,
+              asSpectator,
+            },
+            (ack) => {
+              if (ack.ok && ack.roomId) {
+                setLocalRoomState(null);
+                currentRoomIdRef.current = ack.roomId;
+                saveStoredRoomId(ack.roomId);
+                syncRoomUrlParam(ack.roomId);
+                setMySeatIndex(ack.seatIndex ?? null);
+                setMyPlayerId(ack.playerId ?? null);
+                setIsSpectator(Boolean(ack.isSpectator));
+                clearError();
+              } else if (ack.error) {
+                showError(ack.error);
+              }
+              resolve(ack);
+            },
+          );
+        });
+      }
+
+      if (peerHostRef.current && currentRoomIdRef.current === normalizedRoomId) {
+        const ack = peerHostRef.current.handleJoin({
+          sessionToken: sessionTokenRef.current,
+          playerName: trimmedName,
+          preferredSeatIndex,
+          asSpectator,
+        });
+        if (ack.ok) {
+          setMySeatIndex(ack.seatIndex ?? null);
+          setMyPlayerId(ack.playerId ?? null);
+          setIsSpectator(Boolean(ack.isSpectator));
+          clearError();
+        } else if (ack.error) {
+          showError(ack.error);
+        }
+        return ack;
+      }
+
+      if (peerClientRef.current && currentRoomIdRef.current === normalizedRoomId) {
+        const ack = await peerClientRef.current.sendJoin({
+          playerName: trimmedName,
+          preferredSeatIndex,
+          asSpectator,
+        });
+        if (ack.ok) {
+          setMySeatIndex(ack.seatIndex ?? null);
+          setMyPlayerId(ack.playerId ?? null);
+          setIsSpectator(Boolean(ack.isSpectator));
+          clearError();
+        } else if (ack.error) {
+          showError(ack.error);
+        }
+        return ack;
+      }
+
+      if (transportMode === 'p2p') {
+        peerClientRef.current?.destroy();
+        peerClientRef.current = null;
+
+        const { client, ack } = await PeerRoomClient.connect({
+          roomId: normalizedRoomId,
+          sessionToken: sessionTokenRef.current,
+          playerName: trimmedName,
+          preferredSeatIndex,
+          asSpectator,
+          callbacks: {
+            onState: (room, entries) => {
+              setLocalRoomState(null);
+              setRoomState(room);
+              setStandaloneGameState(room.gameState);
+              if (entries && entries.length > 0) {
+                setLastActionEntries(entries);
+              }
+            },
+            onError: (msg) => showError(msg),
+          },
+        });
+
+        if (ack.ok && client && ack.roomId) {
+          peerClientRef.current = client;
+          currentRoomIdRef.current = ack.roomId;
+          saveStoredRoomId(ack.roomId);
+          syncRoomUrlParam(ack.roomId);
+          setMySeatIndex(ack.seatIndex ?? null);
+          setMyPlayerId(ack.playerId ?? null);
+          setIsSpectator(Boolean(ack.isSpectator));
+          clearError();
+          return ack;
+        }
+        if (ack.error) showError(ack.error);
+        return ack;
+      }
+
+      const msg = 'เซิร์ฟเวอร์ออนไลน์ไม่พร้อมใช้งาน สามารถเลือก "เล่นทันทีบนเบราว์เซอร์ (AI บอท)" ได้เลย!';
+      showError(msg);
+      return { ok: false, error: msg };
+    },
+    [clearError, showError, transportMode],
   );
 
   const selectSeat = useCallback(
@@ -625,6 +766,12 @@ export function useSocketGame(): UseSocketGameResult {
           resolve({ ok: true });
           return;
         }
+        if (peerHostRef.current) {
+          const ack = peerHostRef.current.updateConfig(config);
+          if (!ack.ok && ack.error) showError(ack.error);
+          resolve(ack);
+          return;
+        }
         const socket = socketRef.current;
         const roomId = roomState?.roomId ?? currentRoomIdRef.current;
         if (!socket || !roomId) {
@@ -645,6 +792,14 @@ export function useSocketGame(): UseSocketGameResult {
   const setReady = useCallback(
     (ready: boolean) => {
       if (localRoomState) return;
+      if (peerHostRef.current) {
+        peerHostRef.current.handleSetReady(sessionTokenRef.current, ready);
+        return;
+      }
+      if (peerClientRef.current) {
+        peerClientRef.current.setReady(ready);
+        return;
+      }
       const socket = socketRef.current;
       const roomId = roomState?.roomId ?? currentRoomIdRef.current;
       if (!socket || !roomId) return;
@@ -672,6 +827,13 @@ export function useSocketGame(): UseSocketGameResult {
         setMyPlayerId(humanSeat !== null ? `player-${humanSeat + 1}` : null);
         setIsSpectator(humanSeat === null);
         resolve({ ok: true });
+        return;
+      }
+
+      if (peerHostRef.current) {
+        const ack = peerHostRef.current.startGame();
+        if (!ack.ok && ack.error) showError(ack.error);
+        resolve(ack);
         return;
       }
 
@@ -716,6 +878,21 @@ export function useSocketGame(): UseSocketGameResult {
           return;
         }
 
+        if (peerHostRef.current) {
+          const ack = peerHostRef.current.handleGameAction(sessionTokenRef.current, action);
+          if (!ack.ok && ack.error) showError(ack.error);
+          resolve(ack);
+          return;
+        }
+
+        if (peerClientRef.current) {
+          void peerClientRef.current.sendAction(action).then((ack) => {
+            if (!ack.ok && ack.error) showError(ack.error);
+            resolve(ack);
+          });
+          return;
+        }
+
         const socket = socketRef.current;
         const roomId = roomState?.roomId ?? currentRoomIdRef.current;
         if (!socket || !roomId) {
@@ -745,6 +922,15 @@ export function useSocketGame(): UseSocketGameResult {
       setIsSpectator(false);
       clearError();
       return;
+    }
+
+    if (peerHostRef.current) {
+      peerHostRef.current.destroy();
+      peerHostRef.current = null;
+    }
+    if (peerClientRef.current) {
+      peerClientRef.current.leave();
+      peerClientRef.current = null;
     }
 
     const socket = socketRef.current;
@@ -782,6 +968,11 @@ export function useSocketGame(): UseSocketGameResult {
         return;
       }
 
+      if (peerHostRef.current) {
+        resolve(peerHostRef.current.resetLobby());
+        return;
+      }
+
       const socket = socketRef.current;
       const roomId = roomState?.roomId ?? currentRoomIdRef.current;
       if (!socket || !roomId) {
@@ -814,6 +1005,7 @@ export function useSocketGame(): UseSocketGameResult {
     roomState: activeRoomState,
     gameState,
     connectionStatus,
+    transportMode,
     isLocalOffline,
     mySeatIndex,
     myPlayerId,

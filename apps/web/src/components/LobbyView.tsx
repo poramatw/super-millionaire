@@ -24,11 +24,12 @@ import {
   Users,
 } from 'lucide-react';
 import { BankerAvatar, BoardCenterArt, PlayerToken } from '../artwork';
-import type { ConnectionStatus } from '../hooks/useSocketGame';
+import type { ConnectionStatus, TransportMode } from '../hooks/useSocketGame';
 
 export interface LobbyViewProps {
   roomState: RoomState | null;
   connectionStatus: ConnectionStatus;
+  transportMode?: TransportMode;
   mySeatIndex: number | null;
   isSpectator: boolean;
   isHost: boolean;
@@ -75,6 +76,7 @@ function buildDefaultConfig(
 export function LobbyView({
   roomState,
   connectionStatus,
+  transportMode = 'socket',
   mySeatIndex,
   isSpectator,
   isHost,
@@ -238,9 +240,11 @@ export function LobbyView({
                       }`}
                     />
                     {connectionStatus === 'connected'
-                      ? 'เชื่อมต่อเซิร์ฟเวอร์แล้ว'
+                      ? transportMode === 'p2p'
+                        ? 'พร้อมสร้างห้องออนไลน์ (P2P)'
+                        : 'เชื่อมต่อเซิร์ฟเวอร์แล้ว'
                       : connectionStatus === 'connecting'
-                        ? 'กำลังเชื่อมต่อเซิร์ฟเวอร์...'
+                        ? 'กำลังเตรียมระบบห้องออนไลน์...'
                         : 'ขาดการเชื่อมต่อ กำลังลองใหม่...'}
                   </span>
                   <span className="rounded-full border border-amber-300/30 bg-stone-950/50 px-2.5 py-1 text-amber-100">

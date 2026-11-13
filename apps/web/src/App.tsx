@@ -242,6 +242,7 @@ export default function App() {
     roomState,
     gameState,
     connectionStatus,
+    transportMode,
     isLocalOffline,
     mySeatIndex,
     myPlayerId,
@@ -777,6 +778,7 @@ export default function App() {
         <LobbyView
           roomState={roomState}
           connectionStatus={connectionStatus}
+          transportMode={transportMode}
           mySeatIndex={mySeatIndex}
           isSpectator={isSpectator}
           isHost={isHost}

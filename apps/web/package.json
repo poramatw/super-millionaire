@@ -13,6 +13,7 @@
     "@super-millionaire/shared": "*",
     "@types/three": "^0.187.0",
     "lucide-react": "^1.72.0",
+    "peerjs": "^1.5.5",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "socket.io-client": "^4.8.4",
