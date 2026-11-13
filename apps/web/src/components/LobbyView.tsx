@@ -56,13 +56,36 @@ const BOT_STYLE_LABELS: Record<BotStyle, string> = {
   cautious: 'รอบคอบ (Cautious)',
 };
 
+function extractRoomCode(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  try {
+    if (/^https?:\/\//i.test(trimmed)) {
+      const parsed = new URL(trimmed);
+      const param = parsed.searchParams.get('room');
+      if (param) {
+        return param.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 8);
+      }
+    }
+  } catch {
+    // Fall through to regex extraction
+  }
+  const match = trimmed.match(/(?:[?&]room=|รหัสห้อง\s*:?\s*)([a-zA-Z0-9]{4,8})/i);
+  if (match?.[1]) {
+    return match[1].toUpperCase();
+  }
+  return trimmed.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 8);
+}
+
 function buildDefaultConfig(
   totalSeats: 2 | 3 | 4 | 5 | 6 | 7 | 8 = 4,
   mode: 'mixed' | 'allBots' | 'allHumans' = 'mixed',
+  forOnline = false,
 ): RoomConfig {
+  const mixedHumanCount = forOnline && totalSeats >= 3 ? 2 : 1;
   const slots: PlayerSlotConfig[] = Array.from({ length: totalSeats }, (_, idx) => {
     const isBot =
-      mode === 'allBots' ? true : mode === 'allHumans' ? false : idx > 0;
+      mode === 'allBots' ? true : mode === 'allHumans' ? false : idx >= mixedHumanCount;
     return {
       seatIndex: idx,
       kind: isBot ? 'bot' : 'human',
@@ -111,7 +134,7 @@ export function LobbyView({
     if (busy) return;
     setBusy(true);
     try {
-      await onCreateRoom(playerName, buildDefaultConfig(createSeats, createPreset));
+      await onCreateRoom(playerName, buildDefaultConfig(createSeats, createPreset, true));
     } finally {
       setBusy(false);
     }
@@ -120,14 +143,15 @@ export function LobbyView({
   const handleStartLocal = () => {
     if (busy) return;
     const localPreset = createPreset === 'allHumans' ? 'mixed' : createPreset;
-    onStartLocalGame(playerName, buildDefaultConfig(createSeats, localPreset));
+    onStartLocalGame(playerName, buildDefaultConfig(createSeats, localPreset, false));
   };
 
   const handleJoin = async (asSpectator = false) => {
-    if (busy || !isConnected || !joinCode.trim()) return;
+    const normalizedCode = extractRoomCode(joinCode);
+    if (busy || !isConnected || normalizedCode.length < 4) return;
     setBusy(true);
     try {
-      await onJoinRoom(joinCode.trim().toUpperCase(), playerName, undefined, asSpectator);
+      await onJoinRoom(normalizedCode, playerName, undefined, asSpectator);
     } finally {
       setBusy(false);
     }
@@ -399,10 +423,9 @@ export function LobbyView({
                   </label>
                   <input
                     type="text"
-                    maxLength={8}
                     value={joinCode}
-                    onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                    placeholder="เช่น RICH88"
+                    onChange={(e) => setJoinCode(extractRoomCode(e.target.value))}
+                    placeholder="เช่น RICH88 หรือวางลิงก์เชิญ"
                     className="mono-num mt-2 w-full rounded-xl border-2 border-[#2a2118]/40 bg-white/90 px-4 py-3 text-center text-xl font-extrabold uppercase tracking-[0.22em] text-[#1c1814] placeholder:tracking-normal placeholder:font-normal placeholder:text-stone-400 focus:border-[#1c4e8a] focus:outline-none"
                   />
                 </div>
@@ -547,6 +570,23 @@ export function LobbyView({
               </div>
             )}
           </div>
+
+          {isSpectator && (
+            <div className="mt-3 rounded-xl border border-sky-700/30 bg-sky-50 px-3.5 py-2.5 text-xs font-semibold text-sky-950">
+              {humanSeats.some((s) => !s.occupiedBySocketId)
+                ? 'คุณอยู่ในโหมดผู้ชม — กดปุ่ม "เลือกตัวเดินนี้" ในที่นั่งคนว่างด้านล่างเพื่อลงเล่นได้เลย'
+                : 'คุณอยู่ในโหมดผู้ชม (ยังไม่มีที่นั่งผู้เล่นจริงว่าง) — กรุณาให้เจ้าบ้านกด "เปลี่ยนเป็นคน" ในช่อง AI บอท แล้วกด "เลือกตัวเดินนี้"'}
+            </div>
+          )}
+
+          {isHost &&
+            !allBotsRoom &&
+            humanSeats.every((s) => Boolean(s.occupiedBySocketId)) &&
+            roomState.seats.some((s) => s.kind === 'bot') && (
+              <div className="mt-3 rounded-xl border border-amber-700/30 bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-950">
+                ตอนนี้ไม่มีที่นั่งผู้เล่นจริงว่าง — หากต้องการให้เพื่อนเพิ่มเข้าเล่น กรุณากด "เปลี่ยนเป็นคน" ในช่อง AI บอทด้านล่าง
+              </div>
+            )}
 
           {/* Seat Grid */}
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

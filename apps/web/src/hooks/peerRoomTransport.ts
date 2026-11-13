@@ -1,4 +1,4 @@
-import Peer, { type DataConnection } from 'peerjs';
+import Peer, { util as peerUtil, type DataConnection } from 'peerjs';
 import {
   BOT_DEFAULT_NAMES,
   PLAYER_COLORS,
@@ -23,8 +23,10 @@ const PEER_PREFIX = 'sm9028-';
 
 const PEER_ICE_CONFIG: RTCConfiguration = {
   iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
+    ...(peerUtil.defaultConfig?.iceServers ?? []),
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
   ],
 };
 
@@ -102,8 +104,9 @@ export class PeerRoomHost {
   private room: RoomState;
   private readonly hostSessionToken: string;
   private readonly seatTokens = new Map<number, string>();
-  private readonly connections = new Map<string, DataConnection>();
-  private readonly connSession = new Map<string, string>();
+  private readonly connections = new Set<DataConnection>();
+  private readonly connSession = new WeakMap<DataConnection, string>();
+  private readonly connQueues = new WeakMap<DataConnection, PeerHostToClientMsg[]>();
   private readonly callbacks: HostTransportCallbacks;
   private botTimer: number | null = null;
   private destroyed = false;
@@ -247,6 +250,27 @@ export class PeerRoomHost {
     };
   }
 
+  private sendToConn(conn: DataConnection, msg: PeerHostToClientMsg): void {
+    if (conn.open) {
+      conn.send(msg);
+      return;
+    }
+    const queue = this.connQueues.get(conn) ?? [];
+    queue.push(msg);
+    this.connQueues.set(conn, queue);
+  }
+
+  private flushConnQueue(conn: DataConnection): void {
+    const queue = this.connQueues.get(conn);
+    if (!queue || queue.length === 0 || !conn.open) return;
+    this.connQueues.delete(conn);
+    for (const msg of queue) {
+      if (conn.open) {
+        conn.send(msg);
+      }
+    }
+  }
+
   private attachPeer(peer: Peer): void {
     this.peer = peer;
     peer.on('connection', (conn) => {
@@ -254,19 +278,38 @@ export class PeerRoomHost {
         conn.close();
         return;
       }
-      this.connections.set(conn.peer, conn);
+      this.connections.add(conn);
+      conn.on('open', () => {
+        this.flushConnQueue(conn);
+      });
       conn.on('data', (raw) => {
         if (!raw || typeof raw !== 'object') return;
         this.handleIncomingMessage(conn, raw as PeerClientToHostMsg);
       });
       conn.on('close', () => {
-        this.connections.delete(conn.peer);
-        const token = this.connSession.get(conn.peer);
-        this.connSession.delete(conn.peer);
-        if (token) {
-          this.markConnectionState(token, false);
+        this.connections.delete(conn);
+        this.connQueues.delete(conn);
+        const token = this.connSession.get(conn);
+        this.connSession.delete(conn);
+        if (token && token !== this.hostSessionToken) {
+          const hasOtherConn = [...this.connections].some(
+            (other) => other.open && this.connSession.get(other) === token,
+          );
+          if (!hasOtherConn) {
+            this.markConnectionState(token, false);
+          }
         }
       });
+    });
+
+    peer.on('disconnected', () => {
+      if (!this.destroyed && !peer.destroyed) {
+        try {
+          peer.reconnect();
+        } catch {
+          // Ignore transient signaling reconnect errors
+        }
+      }
     });
 
     peer.on('error', (err) => {
@@ -277,6 +320,7 @@ export class PeerRoomHost {
   }
 
   private markConnectionState(sessionToken: string, connected: boolean): void {
+    if (sessionToken === this.hostSessionToken && !connected) return;
     let changed = false;
     const nextSeats = this.room.seats.map((s, idx) => {
       if (this.seatTokens.get(idx) !== sessionToken) return s;
@@ -306,7 +350,7 @@ export class PeerRoomHost {
   private broadcastState(entries?: LedgerEntry[]): void {
     this.callbacks.onRoomChange(this.room, entries);
     const msg: PeerHostToClientMsg = { type: 'state', room: this.room, entries };
-    for (const conn of this.connections.values()) {
+    for (const conn of this.connections) {
       if (conn.open) {
         conn.send(msg);
       }
@@ -316,11 +360,18 @@ export class PeerRoomHost {
   private handleIncomingMessage(conn: DataConnection, msg: PeerClientToHostMsg): void {
     switch (msg.type) {
       case 'join': {
-        this.connSession.set(conn.peer, msg.sessionToken);
+        this.connSession.set(conn, msg.sessionToken);
         const ack = this.handleJoin(msg);
-        conn.send({ type: 'ack', reqId: msg.reqId, payload: ack } satisfies PeerHostToClientMsg);
+        this.sendToConn(conn, {
+          type: 'ack',
+          reqId: msg.reqId,
+          payload: ack,
+        } satisfies PeerHostToClientMsg);
         if (ack.ok) {
-          conn.send({ type: 'state', room: this.room } satisfies PeerHostToClientMsg);
+          this.sendToConn(conn, {
+            type: 'state',
+            room: this.room,
+          } satisfies PeerHostToClientMsg);
         }
         break;
       }
@@ -330,7 +381,11 @@ export class PeerRoomHost {
       }
       case 'gameAction': {
         const ack = this.handleGameAction(msg.sessionToken, msg.action);
-        conn.send({ type: 'ack', reqId: msg.reqId, payload: ack } satisfies PeerHostToClientMsg);
+        this.sendToConn(conn, {
+          type: 'ack',
+          reqId: msg.reqId,
+          payload: ack,
+        } satisfies PeerHostToClientMsg);
         break;
       }
       case 'leave': {
@@ -347,12 +402,16 @@ export class PeerRoomHost {
     asSpectator?: boolean;
   }): RoomJoinAck {
     const cleanName = params.playerName.trim().slice(0, 32) || 'ผู้เล่น';
+    // Guard against PeerJS/structured-clone coercing missing optional keys into null
+    const hasPreferredSeat =
+      typeof params.preferredSeatIndex === 'number' &&
+      Number.isInteger(params.preferredSeatIndex);
 
     // Reconnect by token
     for (let i = 0; i < this.room.seats.length; i++) {
       if (this.seatTokens.get(i) === params.sessionToken) {
         const seat = this.room.seats[i]!;
-        if (this.room.status === 'LOBBY' && params.preferredSeatIndex !== undefined && params.preferredSeatIndex !== i) {
+        if (this.room.status === 'LOBBY' && hasPreferredSeat && params.preferredSeatIndex !== i) {
           break; // switching seat in lobby
         }
         seat.occupiedBySocketId =
@@ -395,8 +454,8 @@ export class PeerRoomHost {
     }
 
     let targetIndex = -1;
-    if (params.preferredSeatIndex !== undefined) {
-      const target = this.room.seats[params.preferredSeatIndex];
+    if (hasPreferredSeat) {
+      const target = this.room.seats[params.preferredSeatIndex!];
       if (!target || target.kind !== 'human') {
         return { ok: false, error: 'ที่นั่งนี้ไม่ใช่ช่องผู้เล่นจริง' };
       }
@@ -720,7 +779,7 @@ export class PeerRoomHost {
       window.clearTimeout(this.botTimer);
       this.botTimer = null;
     }
-    for (const conn of this.connections.values()) {
+    for (const conn of this.connections) {
       conn.close();
     }
     this.connections.clear();
@@ -732,6 +791,7 @@ export class PeerRoomHost {
 interface GuestCallbacks {
   onState: (room: RoomState, entries?: LedgerEntry[]) => void;
   onError: (message: string) => void;
+  onDisconnect?: (reason: string) => void;
 }
 
 /**
@@ -743,6 +803,7 @@ export class PeerRoomClient {
   private readonly sessionToken: string;
   private readonly pending = new Map<string, (ack: RoomJoinAck & RoomActionAck) => void>();
   private reqSeq = 0;
+  private destroyed = false;
 
   private constructor(peer: Peer, conn: DataConnection, sessionToken: string, callbacks: GuestCallbacks) {
     this.peer = peer;
@@ -766,7 +827,13 @@ export class PeerRoomClient {
     });
 
     conn.on('close', () => {
-      callbacks.onError('เจ้าบ้านปิดห้องหรือการเชื่อมต่อขาดหาย');
+      if (this.destroyed) return;
+      const msg = 'เจ้าบ้านปิดห้องหรือการเชื่อมต่อขาดหาย';
+      if (callbacks.onDisconnect) {
+        callbacks.onDisconnect(msg);
+      } else {
+        callbacks.onError(msg);
+      }
     });
   }
 
@@ -785,7 +852,7 @@ export class PeerRoomClient {
         const timeout = window.setTimeout(() => {
           p.destroy();
           reject(new Error('หมดเวลาเชื่อมต่อสัญญาณห้อง P2P'));
-        }, 8000);
+        }, 12000);
         p.once('open', () => {
           window.clearTimeout(timeout);
           resolve(p);
@@ -798,17 +865,23 @@ export class PeerRoomClient {
       });
 
       const conn = await new Promise<DataConnection>((resolve, reject) => {
-        const c = peer.connect(`${PEER_PREFIX}${normalized}`, { reliable: true });
+        // Use JSON serialization so optional undefined fields (e.g. preferredSeatIndex) stay omitted rather than coerced to null
+        const c = peer.connect(`${PEER_PREFIX}${normalized}`, {
+          reliable: true,
+          serialization: 'json',
+        });
         const timeout = window.setTimeout(() => {
           c.close();
+          peer.destroy();
           reject(new Error(`ไม่พบห้อง ${normalized} หรือเจ้าบ้านปิดห้องแล้ว`));
-        }, 8000);
+        }, 12000);
         c.once('open', () => {
           window.clearTimeout(timeout);
           resolve(c);
         });
         c.once('error', (err) => {
           window.clearTimeout(timeout);
+          peer.destroy();
           reject(err);
         });
       });
@@ -852,19 +925,22 @@ export class PeerRoomClient {
       const timer = window.setTimeout(() => {
         this.pending.delete(reqId);
         resolve({ ok: false, error: 'คำขอเข้าร่วมห้องหมดเวลา' });
-      }, 6000);
+      }, 8000);
       this.pending.set(reqId, (ack) => {
         window.clearTimeout(timer);
         resolve(ack);
       });
-      this.conn.send({
+      const payload: PeerClientToHostMsg = {
         type: 'join',
         reqId,
         sessionToken: this.sessionToken,
         playerName: params.playerName,
-        preferredSeatIndex: params.preferredSeatIndex,
-        asSpectator: params.asSpectator,
-      } satisfies PeerClientToHostMsg);
+        ...(typeof params.preferredSeatIndex === 'number'
+          ? { preferredSeatIndex: params.preferredSeatIndex }
+          : {}),
+        ...(params.asSpectator ? { asSpectator: true } : {}),
+      };
+      this.conn.send(payload);
     });
   }
 
@@ -884,7 +960,7 @@ export class PeerRoomClient {
       const timer = window.setTimeout(() => {
         this.pending.delete(reqId);
         resolve({ ok: false, error: 'การส่งคำสั่งไปยังเจ้าบ้านหมดเวลา' });
-      }, 6000);
+      }, 8000);
       this.pending.set(reqId, (ack) => {
         window.clearTimeout(timer);
         resolve(ack);
@@ -909,6 +985,7 @@ export class PeerRoomClient {
   }
 
   destroy(): void {
+    this.destroyed = true;
     this.pending.clear();
     this.conn.close();
     this.peer.destroy();

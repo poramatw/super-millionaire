@@ -70,8 +70,9 @@ function saveStoredHostRoom(roomId: string | null): void {
 }
 
 function getOrCreateSessionToken(): string {
+  // Store per-tab in sessionStorage so multiple tabs on the same browser get distinct seats
   try {
-    const existing = window.localStorage.getItem(SESSION_TOKEN_KEY);
+    const existing = window.sessionStorage.getItem(SESSION_TOKEN_KEY);
     if (existing && existing.length >= 8) {
       return existing;
     }
@@ -79,7 +80,7 @@ function getOrCreateSessionToken(): string {
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `sm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    window.localStorage.setItem(SESSION_TOKEN_KEY, generated);
+    window.sessionStorage.setItem(SESSION_TOKEN_KEY, generated);
     return generated;
   } catch {
     return `sm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -301,7 +302,7 @@ export function useSocketGame(): UseSocketGameResult {
       transports: ['websocket', 'polling'] as ('websocket' | 'polling')[],
       reconnection: hasExplicitSocket,
       reconnectionAttempts: hasExplicitSocket ? Infinity : 0,
-      timeout: hasExplicitSocket ? 8000 : 1800,
+      timeout: hasExplicitSocket ? 8000 : 1200,
       reconnectionDelay: 800,
       reconnectionDelayMax: 4000,
     };
@@ -710,6 +711,18 @@ export function useSocketGame(): UseSocketGameResult {
               }
             },
             onError: (msg) => showError(msg),
+            onDisconnect: (msg) => {
+              peerClientRef.current = null;
+              currentRoomIdRef.current = null;
+              saveStoredRoomId(null);
+              syncRoomUrlParam(null);
+              setRoomState(null);
+              setStandaloneGameState(null);
+              setMySeatIndex(null);
+              setMyPlayerId(null);
+              setIsSpectator(false);
+              showError(msg);
+            },
           },
         });
 
