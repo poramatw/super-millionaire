@@ -672,24 +672,24 @@ function drawTileMiddleIllustration(
   if (edge === 'bottom') {
     sx = pb.x + 5;
     sw = pb.width - 10;
-    sy = pb.y + pb.height * 0.37;
-    sh = pb.height * 0.45;
+    sy = pb.y + pb.height * 0.42;
+    sh = pb.height * 0.41;
     fixAngle = 0;
   } else if (edge === 'left') {
-    sx = pb.x + pb.width * 0.18;
-    sw = pb.width * 0.45;
+    sx = pb.x + pb.width * 0.17;
+    sw = pb.width * 0.41;
     sy = pb.y + 5;
     sh = pb.height - 10;
     fixAngle = -Math.PI / 2;
   } else if (edge === 'top') {
     sx = pb.x + 5;
     sw = pb.width - 10;
-    sy = pb.y + pb.height * 0.18;
-    sh = pb.height * 0.45;
+    sy = pb.y + pb.height * 0.17;
+    sh = pb.height * 0.41;
     fixAngle = Math.PI;
   } else if (edge === 'right') {
-    sx = pb.x + pb.width * 0.37;
-    sw = pb.width * 0.45;
+    sx = pb.x + pb.width * 0.42;
+    sw = pb.width * 0.41;
     sy = pb.y + 5;
     sh = pb.height - 10;
     fixAngle = Math.PI / 2;
@@ -749,7 +749,6 @@ export function renderPerimeterTiles(
     ctx.translate(tx + cell / 2, ty + cell / 2);
 
     if (edge === 'left') ctx.rotate(Math.PI / 2);
-    else if (edge === 'top') ctx.rotate(Math.PI);
     else if (edge === 'right') ctx.rotate(-Math.PI / 2);
 
     const isDarkCard = tile.type === 'chest' || tile.type === 'chance';
@@ -772,6 +771,9 @@ export function renderPerimeterTiles(
         ctx.beginPath();
         ctx.rect(-hw + 3, -hh + 3, cell - 6, cell - 6);
         ctx.clip();
+        if (tile.index === 20 || tile.index === 30) {
+          ctx.rotate(Math.PI);
+        }
         ctx.drawImage(
           boardImg,
           pb.x + pad,
@@ -793,22 +795,25 @@ export function renderPerimeterTiles(
       }
     } else {
       const bandH = cell * 0.22;
+      const isTopEdge = edge === 'top';
+      const bandY = isTopEdge ? hh - bandH : -hh;
+      const dividerY = isTopEdge ? bandY : bandY + bandH;
       const meta = tile.colorGroup ? COLOR_GROUP_META[tile.colorGroup] : null;
       if (meta) {
         ctx.fillStyle = meta.bandBg;
-        ctx.fillRect(-hw, -hh, cell, bandH);
+        ctx.fillRect(-hw, bandY, cell, bandH);
         ctx.strokeStyle = '#1C1814';
         ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.moveTo(-hw, -hh + bandH);
-        ctx.lineTo(hw, -hh + bandH);
+        ctx.moveTo(-hw, dividerY);
+        ctx.lineTo(hw, dividerY);
         ctx.stroke();
 
         if (tile.deedNumber !== undefined) {
           ctx.fillStyle = meta.bandText;
           ctx.font = '800 21px "JetBrains Mono", monospace';
           ctx.textAlign = 'center';
-          ctx.fillText(`#${tile.deedNumber}`, 0, -hh + bandH * 0.72);
+          ctx.fillText(`#${tile.deedNumber}`, 0, bandY + bandH * 0.72);
         }
       } else {
         ctx.fillStyle =
@@ -819,7 +824,7 @@ export function renderPerimeterTiles(
               : tile.type === 'tax'
                 ? '#78350F'
                 : '#1E293B';
-        ctx.fillRect(-hw, -hh, cell, bandH);
+        ctx.fillRect(-hw, bandY, cell, bandH);
         ctx.fillStyle = '#FEF3C7';
         ctx.font = '800 17px "Prompt", "Noto Sans Thai", sans-serif';
         ctx.textAlign = 'center';
@@ -832,13 +837,18 @@ export function renderPerimeterTiles(
                 ? 'ภาษี'
                 : 'โฉนด',
           0,
-          -hh + bandH * 0.68,
+          bandY + bandH * 0.68,
         );
       }
 
-      // Authentic illustration artwork window for all edge tiles
-      const artTop = -hh + bandH + 6;
-      const artH = cell * 0.48;
+      const priceVal = tile.price ?? tile.taxAmount;
+      const hasFooterVal = Boolean(priceVal);
+
+      // Authentic illustration artwork window for all edge tiles (viewer-upright on top edge)
+      const artTop = isTopEdge
+        ? -hh + (hasFooterVal ? 28 : 10)
+        : -hh + bandH + 6;
+      const artH = isTopEdge ? cell * (hasFooterVal ? 0.39 : 0.45) : cell * 0.48;
       if (boardImg && rect9028) {
         drawTileMiddleIllustration(
           ctx,
@@ -854,25 +864,25 @@ export function renderPerimeterTiles(
         drawTileArtworkGlyph(ctx, tile, 0, artTop + artH * 0.5, cell * 0.62);
       }
 
-      // Crisp Thai Tile Name under illustration
+      // Crisp Thai Tile Name
       ctx.fillStyle = isDarkCard ? '#FFF7D6' : '#1C1814';
       const nameLen = tile.name.length;
       const fontSize = nameLen > 12 ? 15.5 : nameLen > 9 ? 17.5 : 19.5;
       ctx.font = `800 ${fontSize}px "Prompt", "Noto Sans Thai", sans-serif`;
       ctx.textAlign = 'center';
-      const hasFooterVal = Boolean(tile.price || tile.taxAmount);
-      ctx.fillText(tile.name, 0, hh - (hasFooterVal ? 31 : 14));
+      const nameY = isTopEdge ? hh - bandH - 9 : hh - (hasFooterVal ? 31 : 14);
+      ctx.fillText(tile.name, 0, nameY);
 
       // Crisp price/tax pill at outer rim
-      const priceVal = tile.price ?? tile.taxAmount;
       if (priceVal) {
         ctx.fillStyle = tile.taxAmount ? '#991B1B' : '#1C1814';
         ctx.beginPath();
-        ctx.roundRect(-hw + 22, hh - 24, cell - 44, 19, 4);
+        const priceBoxY = isTopEdge ? -hh + 5 : hh - 24;
+        ctx.roundRect(-hw + 22, priceBoxY, cell - 44, 19, 4);
         ctx.fill();
         ctx.fillStyle = '#FDE047';
         ctx.font = '800 15px "JetBrains Mono", monospace';
-        ctx.fillText(`฿${priceVal.toLocaleString('en-US')}`, 0, hh - 9);
+        ctx.fillText(`฿${priceVal.toLocaleString('en-US')}`, 0, priceBoxY + 15);
       }
     }
 

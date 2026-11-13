@@ -159,13 +159,18 @@ export function decideNextBotAction(
   switch (state.phase) {
     case 'AWAIT_ROLL': {
       if (bot.inJail) {
-        if (bot.jailFreeCards > 0) {
+        // Genuine jail detention rule: serve turns trying doubles unless 3rd turn forces bail,
+        // holding a free pass, or an aggressive bot late in game pushes out early.
+        const totalOwned = Object.values(state.deeds).filter((d) => d.ownerId !== null).length;
+        const earlyAggressiveBreakout =
+          bot.botStyle === 'aggressive' &&
+          bot.jailTurns >= 1 &&
+          totalOwned >= 16 &&
+          bot.cash >= profile.bailCashThreshold * 4;
+        if (bot.jailFreeCards > 0 && (bot.jailTurns >= 1 || totalOwned >= 12)) {
           return { type: 'USE_JAIL_CARD', playerId: botPlayerId };
         }
-        if (
-          bot.cash >= JAIL_BAIL_AMOUNT &&
-          (bot.jailTurns >= 2 || bot.cash >= profile.bailCashThreshold)
-        ) {
+        if (bot.cash >= JAIL_BAIL_AMOUNT && (bot.jailTurns >= 2 || earlyAggressiveBreakout)) {
           return { type: 'PAY_JAIL_BAIL', playerId: botPlayerId };
         }
       }

@@ -101,7 +101,7 @@ export function TradeModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 backdrop-blur-xs sm:p-5"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-3 backdrop-blur-xs sm:p-5"
       onClick={onClose}
       role="dialog"
       aria-modal="true"

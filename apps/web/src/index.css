@@ -502,7 +502,7 @@
 .deed-fan-card:focus-visible,
 .deed-fan-card[data-selected='true'] {
   transform: rotate(0deg) translateY(-42px) scale(1.15) !important;
-  z-index: 80 !important;
+  z-index: 30 !important;
   box-shadow:
     0 24px 40px -6px rgba(0, 0, 0, 0.68),
     0 0 0 2px #facc15,

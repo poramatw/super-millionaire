@@ -22,6 +22,7 @@ import {
   Home,
   KeyRound,
   Landmark,
+  Lock,
   RotateCcw,
   ShoppingBag,
   SkipForward,
@@ -201,12 +202,30 @@ export function TurnControls({
         </div>
       )}
 
-      {/* Jail Pre-Roll Actions */}
+      {/* Jail Detention Alert Banner (always visible when current player is stopped in Jail) */}
+      {currentPlayer.inJail && (
+        <div className="rounded-xl border border-amber-400/50 bg-gradient-to-r from-[#2c1512]/90 via-[#381b14]/85 to-[#2c1512]/90 px-3 py-2 text-xs text-amber-100 shadow-inner">
+          <div className="flex items-center gap-2 font-extrabold text-amber-300">
+            <Lock className="h-4 w-4 shrink-0 text-amber-400" />
+            <span>
+              {currentPlayer.name} ติดคุก — ถูกหยุดเดิน (ตาที่{' '}
+              {Math.min(3, currentPlayer.jailTurns + 1)}/3)
+            </span>
+          </div>
+          <p className="mt-0.5 text-[11px] leading-snug text-amber-100/80">
+            {gameState.hasRolledThisTurn
+              ? 'ทอยไม่เบิ้ล จึงถูกหยุดเดินอยู่ในคุกตานี้ — กดจบตาเพื่อผ่านเทิร์น'
+              : `ทอยเบิ้ล 2 ลูกเพื่อออกคุกทันที หรือจ่ายประกันตัว ฿${JAIL_BAIL_AMOUNT} / ใช้บัตรพ้นคุก (ถ้าไม่เบิ้ลจะหยุดเดิน)`}
+          </p>
+        </div>
+      )}
+
+      {/* Jail Pre-Roll Actions (Desktop only; Mobile uses MobileBottomDock) */}
       {isMyTurn &&
         !isAnimatingMove &&
         gameState.phase === 'AWAIT_ROLL' &&
         currentPlayer.inJail && (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="hidden lg:grid lg:grid-cols-2 lg:gap-2">
             <button
               type="button"
               disabled={currentPlayer.cash < JAIL_BAIL_AMOUNT}
@@ -234,24 +253,30 @@ export function TurnControls({
           </div>
         )}
 
-      {/* Roll Dice Button */}
+      {/* Roll Dice Button (Desktop only; Mobile uses MobileBottomDock) */}
       {showRollButton && (
         <button
           type="button"
           onClick={() => onDispatchAction({ type: 'ROLL_DICE', playerId: effectivePlayerId })}
-          className="tactile-btn flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300/60 bg-gradient-to-b from-[#228d4f] to-[#155e34] px-4 py-3 text-base font-extrabold text-amber-50 shadow-[0_6px_18px_rgba(16,185,129,0.28)] hover:brightness-110"
+          className="tactile-btn hidden lg:flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300/60 bg-gradient-to-b from-[#228d4f] to-[#155e34] px-4 py-3 text-base font-extrabold text-amber-50 shadow-[0_6px_18px_rgba(16,185,129,0.28)] hover:brightness-110"
         >
           <Dices className="h-5 w-5 text-amber-200" />
-          <span>{canRollDoubles ? 'ทอยเบิ้ลอีกครั้ง!' : 'ทอยลูกเต๋า 2 ลูก'}</span>
+          <span>
+            {currentPlayer.inJail
+              ? 'ทอยลุ้นเบิ้ลออกคุก (ไม่เบิ้ลหยุดเดิน)'
+              : canRollDoubles
+                ? 'ทอยเบิ้ลอีกครั้ง!'
+                : 'ทอยลูกเต๋า 2 ลูก'}
+          </span>
         </button>
       )}
 
-      {/* Buy / Decline Decision (NO AUCTION) */}
+      {/* Buy / Decline Decision (NO AUCTION) (Desktop only; Mobile uses MobileBottomDock) */}
       {isMyTurn &&
         !isAnimatingMove &&
         gameState.phase === 'AWAIT_DECISION' &&
         decisionTile && (
-          <div className="space-y-2.5 rounded-xl border border-amber-400/45 bg-stone-950/75 p-3 shadow-inner">
+          <div className="hidden lg:block space-y-2.5 rounded-xl border border-amber-400/45 bg-stone-950/75 p-3 shadow-inner">
             <div className="flex items-center justify-between gap-2 text-xs">
               <span className="font-bold text-amber-100">
                 {decisionTile.deedNumber !== undefined ? `#${decisionTile.deedNumber} ` : ''}
@@ -287,9 +312,9 @@ export function TurnControls({
           </div>
         )}
 
-      {/* Action Phase: Land-on-own-tile Build / Unmortgage */}
+      {/* Action Phase: Land-on-own-tile Build / Unmortgage (Desktop only; Mobile uses MobileBottomDock) */}
       {isMyTurn && !isAnimatingMove && gameState.phase === 'ACTION_PHASE' && (
-        <div className="space-y-2">
+        <div className="hidden lg:block space-y-2">
           {(buildCheck.allowed || unmortgageCheck.allowed) && (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {buildCheck.allowed && (
@@ -442,14 +467,16 @@ export function TurnControls({
         </div>
       )}
 
-      {/* Trade & End Turn Footer */}
+      {/* Trade & End Turn Footer (End Turn desktop-only; Mobile uses MobileBottomDock) */}
       {(canProposeTrade || canEndTurn) && (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div
+          className={`${canProposeTrade ? 'grid' : 'hidden lg:grid'} grid-cols-1 gap-2 sm:grid-cols-2`}
+        >
           {canProposeTrade && (
             <button
               type="button"
               onClick={onOpenTradeModal}
-              className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border border-sky-400/50 bg-gradient-to-b from-[#2260aa] to-[#163f72] px-3 py-2.5 text-sm font-bold text-white shadow hover:brightness-110"
+              className="tactile-btn sm:col-span-2 lg:col-span-1 flex items-center justify-center gap-1.5 rounded-xl border border-sky-400/50 bg-gradient-to-b from-[#2260aa] to-[#163f72] px-3 py-2.5 text-sm font-bold text-white shadow hover:brightness-110"
             >
               <ArrowLeftRight className="h-4 w-4" />
               <span>ยื่นแลกเปลี่ยน</span>
@@ -460,10 +487,14 @@ export function TurnControls({
             <button
               type="button"
               onClick={() => onDispatchAction({ type: 'END_TURN', playerId: effectivePlayerId })}
-              className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border border-rose-400/50 bg-gradient-to-b from-[#d92b35] to-[#9e1a22] px-4 py-2.5 text-sm font-extrabold text-white shadow-md hover:brightness-110"
+              className="tactile-btn hidden lg:flex items-center justify-center gap-1.5 rounded-xl border border-rose-400/50 bg-gradient-to-b from-[#d92b35] to-[#9e1a22] px-4 py-2.5 text-sm font-extrabold text-white shadow-md hover:brightness-110"
             >
               <CheckCircle2 className="h-4 w-4" />
-              <span>จบเทิร์น</span>
+              <span>
+                {currentPlayer.inJail && gameState.hasRolledThisTurn
+                  ? 'จบตา (หยุดในคุกต่อ)'
+                  : 'จบเทิร์น'}
+              </span>
             </button>
           )}
         </div>

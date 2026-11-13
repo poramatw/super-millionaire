@@ -146,7 +146,13 @@ function MobileBottomDock({
               className="tactile-btn flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-[#143d25] bg-[#1b7a43] px-4 py-2.5 text-sm font-extrabold text-amber-50 shadow"
             >
               <Dices className="h-4 w-4" />
-              <span>{canRollDoubles ? 'ทอยเบิ้ลอีกครั้ง!' : 'ทอยลูกเต๋า 2 ลูก'}</span>
+              <span>
+                {currentPlayer.inJail
+                  ? 'ทอยลุ้นเบิ้ลออกคุก'
+                  : canRollDoubles
+                    ? 'ทอยเบิ้ลอีกครั้ง!'
+                    : 'ทอยลูกเต๋า 2 ลูก'}
+              </span>
             </button>
           </>
         ) : gameState.phase === 'AWAIT_DECISION' && decisionTile ? (
@@ -193,7 +199,11 @@ function MobileBottomDock({
                 onClick={() =>
                   onDispatchAction({ type: 'BUILD_ON_CURRENT_TILE', playerId: effectivePlayerId })
                 }
-                className="tactile-btn flex items-center justify-center gap-1 rounded-xl border-2 border-pink-800 bg-pink-600 px-3 py-2.5 text-xs font-extrabold text-white"
+                className={`tactile-btn flex items-center justify-center gap-1 rounded-xl border px-3 py-2.5 text-xs font-extrabold text-amber-50 shadow ${
+                  buildCheck.isHotelUpgrade
+                    ? 'border-amber-300/70 bg-gradient-to-b from-[#b91c1c] to-[#7f1d1d]'
+                    : 'border-amber-400/70 bg-gradient-to-b from-[#b45309] to-[#78350f]'
+                }`}
               >
                 {buildCheck.isHotelUpgrade ? (
                   <Building2 className="h-4 w-4" />
@@ -227,7 +237,11 @@ function MobileBottomDock({
                 className="tactile-btn flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 border-[#7f1319] bg-[#c8232c] px-4 py-2.5 text-sm font-extrabold text-white shadow"
               >
                 <CheckCircle2 className="h-4 w-4" />
-                <span>จบเทิร์น</span>
+                <span>
+                  {currentPlayer.inJail && gameState.hasRolledThisTurn
+                    ? 'จบตา (หยุดในคุก)'
+                    : 'จบเทิร์น'}
+                </span>
               </button>
             )}
           </>
@@ -279,6 +293,7 @@ export default function App() {
   const [recentlyBuilt, setRecentlyBuilt] = useState<RecentlyBuiltFx | null>(null);
   const [cashTransferFx, setCashTransferFx] = useState<CashTransferFx | null>(null);
   const [myCashDelta, setMyCashDelta] = useState<{ amount: number; key: number } | null>(null);
+  const [jailAlertBanner, setJailAlertBanner] = useState<{ message: string; key: number } | null>(null);
   const [isThrowingDice, setIsThrowingDice] = useState(false);
   const [showThrownDiceOverlay, setShowThrownDiceOverlay] = useState(false);
   const [throwKey, setThrowKey] = useState(0);
@@ -297,6 +312,8 @@ export default function App() {
   const diceSettleTimerRef = useRef<number | null>(null);
   const diceHideTimerRef = useRef<number | null>(null);
   const buildFxTimerRef = useRef<number | null>(null);
+  const jailBannerTimerRef = useRef<number | null>(null);
+  const pendingJailBannerRef = useRef<{ message: string; key: number } | null>(null);
   const cashFxTimerRef = useRef<number | null>(null);
   const cashDeltaTimerRef = useRef<number | null>(null);
   const autoModalTimerRef = useRef<number | null>(null);
@@ -322,6 +339,14 @@ export default function App() {
     }, 3200);
   }, []);
 
+  const triggerJailBanner = useCallback((banner: { message: string; key: number }) => {
+    if (jailBannerTimerRef.current !== null) window.clearTimeout(jailBannerTimerRef.current);
+    setJailAlertBanner(banner);
+    jailBannerTimerRef.current = window.setTimeout(() => {
+      setJailAlertBanner(null);
+    }, 3600);
+  }, []);
+
   const flushPostWalkEffects = useCallback(
     (autoOpenTileIndex: number | null) => {
       const sounds = pendingWalkSoundsRef.current;
@@ -330,6 +355,12 @@ export default function App() {
         if (s === 'cash') soundFX.playCashChing();
         else if (s === 'card') soundFX.playCardFlip();
         else if (s === 'jail') soundFX.playJailBuzzer();
+      }
+
+      const queuedJailBanner = pendingJailBannerRef.current;
+      pendingJailBannerRef.current = null;
+      if (queuedJailBanner) {
+        triggerJailBanner(queuedJailBanner);
       }
 
       const queuedCashFx = pendingWalkCashFxRef.current;
@@ -369,7 +400,7 @@ export default function App() {
         }
       }
     },
-    [triggerCashDelta, triggerCashTransferFx],
+    [triggerCashDelta, triggerCashTransferFx, triggerJailBanner],
   );
 
   useEffect(() => {
@@ -449,7 +480,15 @@ export default function App() {
 
     const forwardDist = (toPos - fromPos + 40) % 40;
     const backwardDist = (fromPos - toPos + 40) % 40;
-    const isShortForward = !movedInJail && forwardDist >= 1 && forwardDist <= 12;
+    const rolledTotal = gameState.lastDice?.total ?? 0;
+    const wentViaGoToJail =
+      movedInJail &&
+      toPos === 10 &&
+      rolledTotal >= 2 &&
+      rolledTotal <= 12 &&
+      (fromPos + rolledTotal) % 40 === 30;
+    const isShortForward =
+      (!movedInJail && forwardDist >= 1 && forwardDist <= 12) || wentViaGoToJail;
     const isShortBackward = !movedInJail && backwardDist >= 1 && backwardDist <= 3;
 
     const shouldAutoOpenTileModal = Boolean(
@@ -471,7 +510,11 @@ export default function App() {
       return;
     }
 
-    const totalSteps = isShortForward ? forwardDist : backwardDist;
+    const totalSteps = wentViaGoToJail
+      ? rolledTotal
+      : isShortForward
+        ? forwardDist
+        : backwardDist;
     const delta = isShortForward ? 1 : -1;
     let step = 0;
 
@@ -499,13 +542,16 @@ export default function App() {
       if (step < totalSteps) {
         hopTimerRef.current = window.setTimeout(runStep, 440);
       } else {
-        hopTimerRef.current = window.setTimeout(() => {
-          hopTimerRef.current = null;
-          setAnimatingPlayerId(null);
-          setHopSpotlightTile(null);
-          setDisplayPositions(nextSnapshot);
-          flushPostWalkEffects(shouldAutoOpenTileModal ? toPos : null);
-        }, 260);
+        hopTimerRef.current = window.setTimeout(
+          () => {
+            hopTimerRef.current = null;
+            setAnimatingPlayerId(null);
+            setHopSpotlightTile(null);
+            setDisplayPositions(nextSnapshot);
+            flushPostWalkEffects(shouldAutoOpenTileModal ? toPos : null);
+          },
+          wentViaGoToJail ? 440 : 260,
+        );
       }
     };
 
@@ -523,6 +569,7 @@ export default function App() {
       if (cashFxTimerRef.current !== null) window.clearTimeout(cashFxTimerRef.current);
       if (cashDeltaTimerRef.current !== null) window.clearTimeout(cashDeltaTimerRef.current);
       if (autoModalTimerRef.current !== null) window.clearTimeout(autoModalTimerRef.current);
+      if (jailBannerTimerRef.current !== null) window.clearTimeout(jailBannerTimerRef.current);
     };
   }, []);
 
@@ -683,10 +730,23 @@ export default function App() {
           if (isWalkInProgress) pendingWalkSoundsRef.current.push('card');
           else soundFX.playCardFlip();
           break;
-        case 'JAIL':
-          if (isWalkInProgress) pendingWalkSoundsRef.current.push('jail');
-          else soundFX.playJailBuzzer();
+        case 'JAIL': {
+          const actor = entry.actorId
+            ? gameState.players.find((p) => p.id === entry.actorId)
+            : undefined;
+          const banner = {
+            key: entry.seq,
+            message: `🔒 ${actor?.name ?? 'ผู้เล่น'} เข้าคุก! หยุดเดินชั่วคราว (ทอยเบิ้ลหรือจ่าย ฿${JAIL_BAIL_AMOUNT} ในตาถัดไป)`,
+          };
+          if (isWalkInProgress) {
+            pendingWalkSoundsRef.current.push('jail');
+            pendingJailBannerRef.current = banner;
+          } else {
+            soundFX.playJailBuzzer();
+            triggerJailBanner(banner);
+          }
           break;
+        }
         case 'GAME_OVER':
           soundFX.playFanfare();
           break;
@@ -757,7 +817,7 @@ export default function App() {
       {errorToast && (
         <div
           role="alert"
-          className="fixed top-3 left-1/2 z-[60] flex w-[92%] max-w-md -translate-x-1/2 items-center justify-between gap-2 rounded-xl border-2 border-rose-400 bg-rose-950/95 px-3.5 py-2.5 text-xs font-bold text-rose-100 shadow-2xl backdrop-blur"
+          className="fixed top-3 left-1/2 z-[120] flex w-[92%] max-w-md -translate-x-1/2 items-center justify-between gap-2 rounded-xl border-2 border-rose-400 bg-rose-950/95 px-3.5 py-2.5 text-xs font-bold text-rose-100 shadow-2xl backdrop-blur"
         >
           <div className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4 shrink-0 text-rose-300" />
@@ -768,6 +828,25 @@ export default function App() {
             onClick={clearError}
             aria-label="ปิดการแจ้งเตือน"
             className="rounded p-1 hover:bg-rose-900"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Jail Entry / Detention Banner */}
+      {jailAlertBanner && (
+        <div
+          key={jailAlertBanner.key}
+          role="status"
+          className="fixed top-14 left-1/2 z-[115] flex w-[92%] max-w-md -translate-x-1/2 items-center justify-between gap-2 rounded-xl border-2 border-amber-400/80 bg-[#2a120f]/95 px-3.5 py-2.5 text-xs font-extrabold text-amber-100 shadow-2xl backdrop-blur"
+        >
+          <span>{jailAlertBanner.message}</span>
+          <button
+            type="button"
+            onClick={() => setJailAlertBanner(null)}
+            aria-label="ปิดประกาศเข้าคุก"
+            className="rounded p-1 text-amber-300 hover:bg-amber-900/50"
           >
             <X className="h-4 w-4" />
           </button>

@@ -120,7 +120,7 @@ export function UnoDeedHand({
   return (
     <section
       aria-label="โฉนดในมือของคุณ"
-      className="pointer-events-none relative flex w-full max-w-full flex-col items-center"
+      className="pointer-events-none relative z-10 flex w-full max-w-full flex-col items-center"
     >
       {/* Floating Hearthstone / Balatro / UNO Arc with Group Stacking */}
       <div className="deed-hand-scroll pointer-events-auto w-full max-w-full overflow-x-auto overflow-y-hidden pt-12 pb-2">

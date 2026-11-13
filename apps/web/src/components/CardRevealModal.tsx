@@ -26,7 +26,7 @@ export function CardRevealModal({ drawnCard, player, onClose }: CardRevealModalP
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[55] flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+      className="fixed inset-0 z-[105] flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
       onClick={onClose}
       role="dialog"
       aria-modal="true"

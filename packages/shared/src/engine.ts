@@ -1007,7 +1007,7 @@ export function rollDice(
       type: 'JAIL',
       actorId: playerId,
       tileIndex: JAIL_TILE_INDEX,
-      message: `${player.name} ยังทอยไม่เบิ้ล อยู่ในคุกต่อ (ครั้งที่ ${nextJailTurns}/3)`,
+      message: `${player.name} ทอยไม่เบิ้ล จึงถูกหยุดเดินอยู่ในคุก (ครั้งที่ ${nextJailTurns}/3)`,
     });
     return ok({ ...next, phase: 'ACTION_PHASE', doublesCount: 0 }, entries);
   }
