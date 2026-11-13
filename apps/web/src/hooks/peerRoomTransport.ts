@@ -348,8 +348,14 @@ export class PeerRoomHost {
   }
 
   private broadcastState(entries?: LedgerEntry[]): void {
-    this.callbacks.onRoomChange(this.room, entries);
-    const msg: PeerHostToClientMsg = { type: 'state', room: this.room, entries };
+    // Always publish a fresh shallow copy so React useState re-renders immediately on every update
+    const snapshot: RoomState = {
+      ...this.room,
+      seats: this.room.seats.map((s) => ({ ...s })),
+    };
+    this.room = snapshot;
+    this.callbacks.onRoomChange(snapshot, entries);
+    const msg: PeerHostToClientMsg = { type: 'state', room: snapshot, entries };
     for (const conn of this.connections) {
       if (conn.open) {
         conn.send(msg);
@@ -410,26 +416,29 @@ export class PeerRoomHost {
     // Reconnect by token
     for (let i = 0; i < this.room.seats.length; i++) {
       if (this.seatTokens.get(i) === params.sessionToken) {
-        const seat = this.room.seats[i]!;
         if (this.room.status === 'LOBBY' && hasPreferredSeat && params.preferredSeatIndex !== i) {
           break; // switching seat in lobby
         }
-        seat.occupiedBySocketId =
+        const socketId =
           params.sessionToken === this.hostSessionToken
             ? 'peer-host'
             : `peer-${params.sessionToken.slice(0, 8)}`;
-        seat.name = cleanName || seat.name;
-        if (this.room.gameState) {
-          this.room = {
-            ...this.room,
-            gameState: {
-              ...this.room.gameState,
-              players: this.room.gameState.players.map((p) =>
-                p.seatIndex === i ? { ...p, connected: true } : p,
-              ),
-            },
-          };
-        }
+        this.room = {
+          ...this.room,
+          seats: this.room.seats.map((s, idx) =>
+            idx === i
+              ? { ...s, occupiedBySocketId: socketId, name: cleanName || s.name }
+              : s,
+          ),
+          gameState: this.room.gameState
+            ? {
+                ...this.room.gameState,
+                players: this.room.gameState.players.map((p) =>
+                  p.seatIndex === i ? { ...p, connected: true } : p,
+                ),
+              }
+            : null,
+        };
         this.broadcastState();
         return {
           ok: true,
@@ -473,24 +482,42 @@ export class PeerRoomHost {
     }
 
     // Clear previous seat if switching inside lobby
+    const clearedIndices = new Set<number>();
     for (let i = 0; i < this.room.seats.length; i++) {
       if (this.seatTokens.get(i) === params.sessionToken) {
         this.seatTokens.delete(i);
-        const old = this.room.seats[i]!;
-        old.occupiedBySocketId = null;
-        old.name = `รอผู้เล่น #${i + 1}`;
-        old.ready = false;
+        clearedIndices.add(i);
       }
     }
 
-    const chosen = this.room.seats[targetIndex]!;
     this.seatTokens.set(targetIndex, params.sessionToken);
-    chosen.occupiedBySocketId =
+    const assignedSocketId =
       params.sessionToken === this.hostSessionToken
         ? 'peer-host'
         : `peer-${params.sessionToken.slice(0, 8)}`;
-    chosen.name = cleanName;
-    chosen.ready = targetIndex === this.room.hostSeatIndex;
+
+    this.room = {
+      ...this.room,
+      seats: this.room.seats.map((s, idx) => {
+        if (idx === targetIndex) {
+          return {
+            ...s,
+            occupiedBySocketId: assignedSocketId,
+            name: cleanName,
+            ready: idx === this.room.hostSeatIndex,
+          };
+        }
+        if (clearedIndices.has(idx)) {
+          return {
+            ...s,
+            occupiedBySocketId: null,
+            name: `รอผู้เล่น #${idx + 1}`,
+            ready: false,
+          };
+        }
+        return s;
+      }),
+    };
 
     this.broadcastState();
     return {
@@ -656,16 +683,24 @@ export class PeerRoomHost {
 
   private handleRemoteLeave(sessionToken: string): void {
     if (this.room.status === 'LOBBY') {
+      const removed = new Set<number>();
       for (let i = 0; i < this.room.seats.length; i++) {
         if (this.seatTokens.get(i) === sessionToken) {
           this.seatTokens.delete(i);
-          const seat = this.room.seats[i]!;
-          seat.occupiedBySocketId = null;
-          seat.name = `รอผู้เล่น #${i + 1}`;
-          seat.ready = false;
+          removed.add(i);
         }
       }
-      this.broadcastState();
+      if (removed.size > 0) {
+        this.room = {
+          ...this.room,
+          seats: this.room.seats.map((s, idx) =>
+            removed.has(idx)
+              ? { ...s, occupiedBySocketId: null, name: `รอผู้เล่น #${idx + 1}`, ready: false }
+              : s,
+          ),
+        };
+        this.broadcastState();
+      }
     } else if (this.room.gameState) {
       for (const [seatIdx, token] of this.seatTokens.entries()) {
         if (token === sessionToken && this.room.gameState) {
