@@ -144,7 +144,7 @@ export function TurnControls({
               {isMyTurn ? 'ตาของคุณ!' : `ตาของ ${currentPlayer.name}`}
             </span>
             {currentPlayer.kind === 'bot' && (
-              <span className="rounded-md border border-purple-400/40 bg-purple-900/80 px-1.5 py-0.5 text-[10px] font-bold text-purple-200">
+              <span className="rounded-md border border-amber-500/35 bg-amber-950/75 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
                 AI
               </span>
             )}
@@ -194,12 +194,10 @@ export function TurnControls({
         </div>
       </div>
 
-      {/* Waiting message when not my turn */}
-      {!isMyTurn && gameState.phase !== 'GAME_OVER' && (
-        <div className="rounded-xl border border-amber-500/20 bg-stone-950/55 px-3 py-2 text-center text-xs font-semibold text-amber-100/80">
-          {isSpectator
-            ? 'คุณกำลังรับชมเกม (โหมดผู้ชม — บอท/ผู้เล่นกำลังดำเนินการ)'
-            : `กำลังรอ ${currentPlayer.name} ตัดสินใจ (ไม่มีจับเวลา)`}
+      {/* Waiting indicator when viewing another player or spectator */}
+      {!isMyTurn && gameState.phase !== 'GAME_OVER' && isSpectator && (
+        <div className="rounded-xl border border-amber-500/20 bg-stone-950/55 px-3 py-1.5 text-center text-[11px] font-medium text-amber-200/80">
+          โหมดผู้ชม — บอทและผู้เล่นกำลังเดินเกมตามลำดับ
         </div>
       )}
 
@@ -253,13 +251,13 @@ export function TurnControls({
         !isAnimatingMove &&
         gameState.phase === 'AWAIT_DECISION' &&
         decisionTile && (
-          <div className="space-y-2 rounded-xl border-2 border-amber-600/50 bg-amber-50 p-3">
+          <div className="space-y-2.5 rounded-xl border border-amber-400/45 bg-stone-950/75 p-3 shadow-inner">
             <div className="flex items-center justify-between gap-2 text-xs">
-              <span className="font-bold text-stone-900">
+              <span className="font-bold text-amber-100">
                 {decisionTile.deedNumber !== undefined ? `#${decisionTile.deedNumber} ` : ''}
                 {decisionTile.name}
               </span>
-              <span className="mono-num font-extrabold text-[#1b7a43]">
+              <span className="mono-num font-extrabold text-emerald-300">
                 ฿{formatBahtNumber(decisionTile.price ?? 0)}
               </span>
             </div>
@@ -270,7 +268,7 @@ export function TurnControls({
                 onClick={() =>
                   onDispatchAction({ type: 'BUY_CURRENT_TILE', playerId: effectivePlayerId })
                 }
-                className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-[#143d25] bg-[#1b7a43] px-3 py-2.5 text-sm font-extrabold text-white shadow disabled:opacity-45"
+                className="tactile-btn flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-emerald-400/60 bg-gradient-to-b from-[#21874c] to-[#14532e] px-3 py-2 text-sm font-extrabold text-amber-50 shadow disabled:opacity-45"
               >
                 <ShoppingBag className="h-4 w-4" />
                 <span>ซื้อโฉนด</span>
@@ -280,7 +278,7 @@ export function TurnControls({
                 onClick={() =>
                   onDispatchAction({ type: 'DECLINE_CURRENT_TILE', playerId: effectivePlayerId })
                 }
-                className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-stone-500 bg-stone-200 px-3 py-2.5 text-sm font-bold text-stone-900 hover:bg-stone-300"
+                className="tactile-btn flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-stone-600 bg-stone-800/90 px-3 py-2 text-sm font-bold text-stone-200 hover:bg-stone-700"
               >
                 <SkipForward className="h-4 w-4" />
                 <span>ไม่ซื้อ</span>
@@ -300,12 +298,16 @@ export function TurnControls({
                   onClick={() =>
                     onDispatchAction({ type: 'BUILD_ON_CURRENT_TILE', playerId: effectivePlayerId })
                   }
-                  className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-pink-800 bg-pink-600 px-3 py-2.5 text-xs font-extrabold text-white shadow"
+                  className={`tactile-btn flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-extrabold text-amber-50 shadow ${
+                    buildCheck.isHotelUpgrade
+                      ? 'border-amber-300/60 bg-gradient-to-b from-[#b91c1c] to-[#7f1d1d]'
+                      : 'border-amber-400/60 bg-gradient-to-b from-[#b45309] to-[#78350f]'
+                  }`}
                 >
                   {buildCheck.isHotelUpgrade ? (
-                    <Building2 className="h-4 w-4" />
+                    <Building2 className="h-4 w-4 text-amber-200" />
                   ) : (
-                    <Home className="h-4 w-4" />
+                    <Home className="h-4 w-4 text-amber-200" />
                   )}
                   <span>
                     {buildCheck.isHotelUpgrade ? 'สร้างโรงแรม' : 'สร้างบ้าน'} (฿
@@ -323,7 +325,7 @@ export function TurnControls({
                       playerId: effectivePlayerId,
                     })
                   }
-                  className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-emerald-800 bg-emerald-600 px-3 py-2.5 text-xs font-extrabold text-white shadow"
+                  className="tactile-btn flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-emerald-400/50 bg-gradient-to-b from-[#1f7d47] to-[#14532e] px-3 py-2 text-xs font-extrabold text-amber-50 shadow"
                 >
                   <RotateCcw className="h-4 w-4" />
                   <span>ไถ่ถอนจำนอง (฿{formatBahtNumber(unmortgageCheck.cost ?? 0)})</span>
@@ -336,15 +338,15 @@ export function TurnControls({
 
       {/* Debt Resolution Panel */}
       {isDebtResolver && debt && (
-        <div className="space-y-2.5 rounded-xl border-2 border-rose-700 bg-rose-50 p-3">
-          <div className="flex items-start gap-2 text-rose-900">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+        <div className="space-y-2.5 rounded-xl border border-rose-400/50 bg-rose-950/75 p-3 text-rose-50">
+          <div className="flex items-start gap-2 text-rose-100">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
             <div className="text-xs">
-              <div className="font-extrabold">
+              <div className="font-extrabold text-amber-200">
                 ค้างชำระ <span className="mono-num">฿{formatBahtNumber(debt.amount)}</span> ({debt.reason})
               </div>
-              <div className="mt-0.5 text-rose-800">
-                เงินสดปัจจุบัน: <span className="mono-num font-bold">฿{formatBahtNumber(currentPlayer.cash)}</span> — กรุณาขายบ้านหรือจำนองโฉนดเพื่อชำระหนี้
+              <div className="mt-0.5 text-rose-200/90">
+                เงินสดปัจจุบัน: <span className="mono-num font-bold text-emerald-300">฿{formatBahtNumber(currentPlayer.cash)}</span> — กรุณาขายบ้านหรือจำนองโฉนดเพื่อชำระหนี้
               </div>
             </div>
           </div>
@@ -365,13 +367,13 @@ export function TurnControls({
                         tileIndex: deed.tileIndex,
                       })
                     }
-                    className="tactile-btn flex w-full items-center justify-between rounded-lg border border-amber-700/40 bg-amber-100 px-2.5 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-200"
+                    className="tactile-btn flex min-h-[40px] w-full items-center justify-between rounded-lg border border-amber-400/40 bg-stone-950/75 px-2.5 py-1.5 text-xs font-bold text-amber-100 hover:bg-stone-900"
                   >
                     <span className="flex items-center gap-1.5 truncate">
-                      <Home className="h-3.5 w-3.5 shrink-0" />
+                      <Home className="h-3.5 w-3.5 shrink-0 text-amber-300" />
                       ขายสิ่งปลูกสร้าง: #{tile.deedNumber} {tile.name}
                     </span>
-                    <span className="mono-num shrink-0 text-emerald-800">
+                    <span className="mono-num shrink-0 text-emerald-300">
                       +฿{formatBahtNumber(info.refund ?? 0)}
                     </span>
                   </button>
@@ -392,13 +394,13 @@ export function TurnControls({
                         tileIndex: deed.tileIndex,
                       })
                     }
-                    className="tactile-btn flex w-full items-center justify-between rounded-lg border border-rose-700/40 bg-white px-2.5 py-1.5 text-xs font-bold text-rose-950 hover:bg-rose-100"
+                    className="tactile-btn flex min-h-[40px] w-full items-center justify-between rounded-lg border border-rose-400/40 bg-stone-950/75 px-2.5 py-1.5 text-xs font-bold text-rose-100 hover:bg-stone-900"
                   >
                     <span className="flex items-center gap-1.5 truncate">
-                      <Landmark className="h-3.5 w-3.5 shrink-0" />
+                      <Landmark className="h-3.5 w-3.5 shrink-0 text-rose-300" />
                       จำนอง: #{tile.deedNumber} {tile.name}
                     </span>
-                    <span className="mono-num shrink-0 text-emerald-800">
+                    <span className="mono-num shrink-0 text-emerald-300">
                       +฿{formatBahtNumber(info.proceeds ?? 0)}
                     </span>
                   </button>

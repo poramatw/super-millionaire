@@ -350,14 +350,14 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     boardMesh.castShadow = true;
     scene.add(boardMesh);
 
-    // 3D Stacked Card Decks in Board Center
+    // 3D Stacked Card Decks in Board Center (aligned with illustrated deck trays)
     const chestDeck = createCardDeckMesh('กองทุน', '#0F766E', '#F4D15A');
-    chestDeck.group.position.set(-2.05, 0, -2.05);
+    chestDeck.group.position.set(-2.75, 0, -2.45);
     chestDeck.group.rotation.y = Math.PI / 4;
     scene.add(chestDeck.group);
 
     const chanceDeck = createCardDeckMesh('เสี่ยงโชค', '#EA580C', '#FFF7D6');
-    chanceDeck.group.position.set(2.05, 0, 2.05);
+    chanceDeck.group.position.set(2.75, 0, 2.45);
     chanceDeck.group.rotation.y = Math.PI / 4;
     scene.add(chanceDeck.group);
 

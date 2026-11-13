@@ -66,10 +66,8 @@ export function UnoDeedHand({
 
   if (isSpectator || !myPlayerId) {
     return (
-      <div className="pointer-events-none flex w-full justify-center px-2">
-        <div className="pointer-events-auto rounded-full border border-amber-400/35 bg-stone-950/85 px-3.5 py-1.5 text-center text-[11px] font-semibold text-amber-200/90 shadow-lg backdrop-blur-md">
-          โหมดผู้ชม — โฉนดและเงินสดของผู้เล่นถูกปิดเป็นความลับ
-        </div>
+      <div className="flex min-h-[48px] w-full items-center justify-center rounded-xl border border-amber-500/20 bg-stone-950/65 px-3.5 py-2 text-center text-[11px] font-semibold text-amber-200/85 backdrop-blur-md">
+        โหมดผู้ชม — โฉนดและเงินสดของผู้เล่นถูกปิดเป็นความลับ
       </div>
     );
   }
@@ -80,15 +78,15 @@ export function UnoDeedHand({
 
   if (count === 0) {
     return (
-      <div className="pointer-events-none flex w-full flex-col items-center gap-1.5 px-2">
+      <div className="flex min-h-[48px] w-full flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-amber-500/25 bg-stone-950/60 px-3.5 py-2 backdrop-blur-md">
+        <span className="text-[11px] font-medium text-amber-100/75 sm:text-xs">
+          สำรับโฉนดในมือว่างอยู่ — ซื้อที่ดินบนกระดานเพื่อจัดเรียงไพ่โฉนดที่นี่
+        </span>
         {myPlayer.jailFreeCards > 0 && (
-          <span className="pointer-events-auto rounded-full border border-emerald-400/60 bg-emerald-950/90 px-2.5 py-0.5 text-[10px] font-bold text-emerald-200 shadow-lg backdrop-blur-md">
+          <span className="rounded-full border border-emerald-400/50 bg-emerald-950/90 px-2.5 py-0.5 text-[10px] font-bold text-emerald-200">
             บัตรพ้นคุก ×{myPlayer.jailFreeCards}
           </span>
         )}
-        <div className="pointer-events-auto rounded-full border border-amber-400/30 bg-stone-950/80 px-4 py-1.5 text-center text-[11px] font-medium text-amber-100/80 shadow-lg backdrop-blur-md">
-          ยังไม่มีโฉนดในมือ — ซื้อที่ดินเพื่อถือไพ่โฉนดแบบการ์ดในมือ
-        </div>
       </div>
     );
   }
@@ -125,7 +123,7 @@ export function UnoDeedHand({
       className="pointer-events-none relative flex w-full max-w-full flex-col items-center"
     >
       {/* Floating Hearthstone / Balatro / UNO Arc with Group Stacking */}
-      <div className="deed-hand-scroll pointer-events-auto w-full max-w-full overflow-x-auto overflow-y-visible pt-10 pb-2">
+      <div className="deed-hand-scroll pointer-events-auto w-full max-w-full overflow-x-auto overflow-y-hidden pt-12 pb-2">
         <div className="mx-auto flex w-max items-end justify-center px-8 sm:px-12">
           {ownedDeeds.map((deed, idx) => {
             const tile = getTile(deed.tileIndex);

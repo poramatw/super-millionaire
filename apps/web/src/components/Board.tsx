@@ -64,7 +64,7 @@ export function Board({
   return (
     <div className="relative w-full">
       {/* 3D WebGL Tabletop Stage */}
-      <div className="tabletop-felt relative h-[430px] w-full overflow-hidden rounded-2xl border border-amber-500/30 shadow-2xl sm:h-[540px] lg:h-[620px]">
+      <div className="tabletop-felt relative h-[410px] w-full overflow-hidden rounded-2xl border border-amber-500/30 shadow-2xl sm:h-[510px] lg:h-[575px]">
         <SuperMillionaire3DScene
           gameState={gameState}
           displayPositions={displayPositions}
@@ -93,31 +93,34 @@ export function Board({
           activeCardDraw={activeCardDraw}
         />
 
-        {/* Top Floating Bar: Turn Status + 3D Camera Controls */}
-        <div className="pointer-events-none absolute inset-x-2.5 top-2.5 z-20 flex flex-wrap items-center justify-between gap-2 sm:inset-x-3.5 sm:top-3">
-          {/* Active Turn Pill */}
-          <div className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-amber-300/50 bg-stone-950/85 px-3 py-1 text-[11px] font-semibold text-amber-100 shadow-lg backdrop-blur-md sm:text-xs">
+        {/* Top Floating Bar: Turn Chip + Unified Segmented Camera Controls */}
+        <div className="pointer-events-none absolute inset-x-2.5 top-2.5 z-20 flex items-center justify-between gap-2 sm:inset-x-3.5 sm:top-3">
+          {/* Active Turn Chip */}
+          <div className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-stone-950/82 px-2.5 py-1 text-[11px] font-semibold text-amber-100 shadow-lg backdrop-blur-md sm:px-3 sm:text-xs">
             <span
               className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/60"
               style={{ backgroundColor: currentPlayer?.color ?? '#E3BE3B' }}
             />
-            <span className="max-w-[140px] truncate sm:max-w-[200px]">
-              ตาที่ <span className="mono-num">{gameState.turnNumber}</span> •{' '}
+            <span className="max-w-[130px] truncate sm:max-w-[200px]">
+              ตาที่ <span className="mono-num font-bold text-amber-300">{gameState.turnNumber}</span> •{' '}
               {currentPlayer?.name}
             </span>
           </div>
 
-          {/* 3D Camera & Tracking Controls */}
-          <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
+          {/* Unified Segmented Camera Bar */}
+          <div
+            className="pointer-events-auto inline-flex items-center divide-x divide-amber-500/20 rounded-xl border border-amber-400/30 bg-stone-950/85 p-0.5 shadow-lg backdrop-blur-md"
+            title="ลากเพื่อหมุนกระดาน • สโครลเพื่อซูม • แตะช่องเพื่อเปิดโฉนด"
+          >
             <button
               type="button"
               onClick={() =>
                 setCameraMode((m) => (m === 'isometric' ? 'topdown' : 'isometric'))
               }
-              className={`tactile-btn inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-semibold shadow-md backdrop-blur-md sm:text-xs ${
+              className={`inline-flex min-h-[30px] items-center gap-1 rounded-l-lg px-2.5 py-1 text-[11px] font-semibold transition sm:text-xs ${
                 cameraMode === 'isometric'
-                  ? 'border-amber-300/70 bg-amber-950/90 text-amber-100'
-                  : 'border-stone-600 bg-stone-900/90 text-stone-200'
+                  ? 'bg-amber-950/90 text-amber-200'
+                  : 'text-stone-300 hover:text-amber-100'
               }`}
               title="สลับมุมมองกล้อง 3D / มุมมองด้านบน"
             >
@@ -126,31 +129,31 @@ export function Board({
               ) : (
                 <Layers className="h-3.5 w-3.5" />
               )}
-              <span>{cameraMode === 'isometric' ? '2.5D โต๊ะจริง' : 'มุมมองบน'}</span>
+              <span>{cameraMode === 'isometric' ? '2.5D' : '2D บน'}</span>
             </button>
 
             <button
               type="button"
               onClick={() => setFollowActiveToken((v) => !v)}
-              className={`tactile-btn inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-semibold shadow-md backdrop-blur-md sm:text-xs ${
+              className={`inline-flex min-h-[30px] items-center gap-1 px-2.5 py-1 text-[11px] font-semibold transition sm:text-xs ${
                 followActiveToken
-                  ? 'border-emerald-400/60 bg-emerald-950/90 text-emerald-100'
-                  : 'border-stone-600 bg-stone-900/90 text-stone-300'
+                  ? 'bg-emerald-950/85 text-emerald-200'
+                  : 'text-stone-300 hover:text-amber-100'
               }`}
               title="เลื่อนกล้องตามตัวเดินขณะทอยเต๋า"
             >
               <Crosshair className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">ติดตามตัวเดิน</span>
+              <span className="hidden sm:inline">ติดตาม</span>
             </button>
 
             <button
               type="button"
               onClick={() => setResetCameraTrigger((n) => n + 1)}
-              className="tactile-btn inline-flex items-center gap-1 rounded-lg border border-stone-600 bg-stone-900/90 px-2.5 py-1 text-[11px] font-semibold text-amber-100 shadow-md backdrop-blur-md hover:bg-stone-800 sm:text-xs"
+              className="inline-flex min-h-[30px] items-center gap-1 rounded-r-lg px-2.5 py-1 text-[11px] font-semibold text-amber-200 transition hover:bg-stone-800/80 sm:text-xs"
               title="รีเซ็ตมุมกล้องกลับค่าเริ่มต้น"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              <span className="hidden md:inline">รีเซ็ตมุมกล้อง</span>
+              <span className="hidden md:inline">รีเซ็ต</span>
             </button>
           </div>
         </div>
@@ -179,7 +182,7 @@ export function Board({
         {showThrownDiceOverlay && thrownDiceFaces && !isThrowingDice && (
           <div
             key={`dice-pill-${throwKey}`}
-            className="pointer-events-none absolute top-13 right-3 z-20 flex items-center gap-1.5 rounded-full border border-amber-300/70 bg-stone-950/88 px-3 py-1 text-xs font-extrabold text-amber-100 shadow-lg backdrop-blur-md sm:top-12"
+            className="pointer-events-none absolute top-13 right-3 z-20 flex items-center gap-1.5 rounded-full border border-amber-300/60 bg-stone-950/88 px-3 py-1 text-xs font-extrabold text-amber-100 shadow-lg backdrop-blur-md sm:top-12"
           >
             <span className="mono-num">
               {thrownDiceFaces.die1} + {thrownDiceFaces.die2} = {thrownDiceFaces.total} แต้ม
@@ -191,11 +194,6 @@ export function Board({
             )}
           </div>
         )}
-
-        {/* Subtle Bottom-Right Camera Hint */}
-        <div className="pointer-events-none absolute right-3 bottom-2 hidden rounded-full bg-stone-950/65 px-2.5 py-0.5 text-[10px] text-amber-200/75 backdrop-blur-xs sm:block">
-          ลากเพื่อหมุนกระดาน • สโครลเพื่อซูม • แตะช่องเพื่อเปิดโฉนด
-        </div>
       </div>
     </div>
   );

@@ -179,7 +179,7 @@ export function PlayerStrip({
                       </span>
                     )}
                     {p.kind === 'bot' ? (
-                      <span className="inline-flex items-center gap-0.5 rounded bg-purple-900/90 px-1.5 py-0.5 text-[9px] font-bold text-purple-200">
+                      <span className="inline-flex items-center gap-0.5 rounded border border-amber-500/35 bg-amber-950/75 px-1.5 py-0.5 text-[9px] font-bold text-amber-200">
                         <Bot className="h-2.5 w-2.5" />
                         AI
                       </span>

@@ -294,14 +294,14 @@ export function LobbyView({
               ชื่อผู้เล่นของคุณ
             </label>
             <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <input
-                type="text"
-                maxLength={24}
-                value={playerName}
-                onChange={(e) => setPlayerName(e.target.value)}
-                placeholder="กรอกชื่อที่ต้องการแสดงบนกระดาน"
-                className="w-full rounded-xl border-2 border-[#2a2118]/40 bg-white/90 px-3.5 py-2.5 font-semibold text-[#1c1814] placeholder:text-stone-400 focus:border-[#1b7a43] focus:outline-none"
-              />
+                <input
+                  type="text"
+                  maxLength={24}
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  placeholder="กรอกชื่อที่ต้องการแสดงบนกระดาน"
+                  className="w-full rounded-xl border-2 border-[#2a2118]/40 bg-white/90 px-3.5 py-2.5 text-base font-semibold text-[#1c1814] placeholder:text-stone-400 focus:border-[#1b7a43] focus:outline-none sm:text-sm"
+                />
               <div className="flex shrink-0 items-center gap-2 rounded-xl border border-[#2a2118]/20 bg-[#ede1c4]/80 px-3 py-2 text-xs font-medium text-stone-700">
                 <BankerAvatar size={28} />
                 <span>นายธนาคารพร้อมแจกธนบัตร!</span>
@@ -639,7 +639,7 @@ export function LobbyView({
 
                       {/* Status badge */}
                       {isBot ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2.5 py-1 text-[11px] font-bold text-purple-800">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-700/25 bg-amber-100/90 px-2.5 py-1 text-[11px] font-bold text-amber-950">
                           <Bot className="h-3 w-3" />
                           AI บอท
                         </span>
@@ -744,7 +744,7 @@ export function LobbyView({
           <div className="mt-5 flex flex-col items-stretch justify-between gap-3 border-t border-[#2a2118]/15 pt-4 sm:flex-row sm:items-center">
             <div className="text-xs text-stone-700">
               {allBotsRoom ? (
-                <span className="font-semibold text-purple-800">
+                <span className="font-semibold text-amber-900">
                   โหมดบอทล้วน + ผู้ชม: AI บอททั้งหมดจะเล่นอัตโนมัติทันทีเมื่อเริ่มเกม
                 </span>
               ) : (
