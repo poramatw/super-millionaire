@@ -16,6 +16,8 @@ export const PLAYER_COLORS: readonly string[] = [
   '#D97706', // Amber Gold
   '#7C3AED', // Violet
   '#0891B2', // Cyan Teal
+  '#EC4899', // Hot Magenta
+  '#65A30D', // Royal Lime
 ] as const;
 
 export const TOKEN_NAMES: readonly string[] = [
@@ -25,6 +27,8 @@ export const TOKEN_NAMES: readonly string[] = [
   'ตุ๊กตุ๊ก',
   'หมวกเศรษฐี',
   'ถุงทอง',
+  'รถซุปเปอร์คาร์',
+  'ราชสีห์ทอง',
 ] as const;
 
 export const BOT_DEFAULT_NAMES: readonly string[] = [
@@ -34,6 +38,8 @@ export const BOT_DEFAULT_NAMES: readonly string[] = [
   'นายทุนเอไอ',
   'เสี่ยใหญ่บอท',
   'มาดามเอไอ',
+  'มหาเศรษฐีบอท',
+  'ดัชเชสเอไอ',
 ] as const;
 
 /**
@@ -553,6 +559,62 @@ export const CHANCE_CARDS: readonly CardDefinition[] = [
     description: 'เดินทางไปยัง #9 การไฟฟ้า (หากผ่านจุดเริ่มต้น รับ 2,000 บาท)',
     effect: { kind: 'MOVE_TO', tileIndex: 12, collectStartIfPassed: true },
   },
+  {
+    id: 'chance-17',
+    deck: 'chance',
+    title: 'ล่องใต้ชมไข่มุกอันดามัน',
+    description: 'เดินทางไปยัง #12 ภูเก็ต (หากผ่านจุดเริ่มต้น รับ 2,000 บาท)',
+    effect: { kind: 'MOVE_TO', tileIndex: 16, collectStartIfPassed: true },
+  },
+  {
+    id: 'chance-18',
+    deck: 'chance',
+    title: 'เดินสายอีสานเหนือ',
+    description: 'เดินทางไปยัง #22 ขอนแก่น (หากผ่านจุดเริ่มต้น รับ 2,000 บาท)',
+    effect: { kind: 'MOVE_TO', tileIndex: 27, collectStartIfPassed: true },
+  },
+  {
+    id: 'chance-19',
+    deck: 'chance',
+    title: 'ดีลใหญ่ผ่านฉลุย',
+    description: 'รับค่านายหน้าปิดดีลอสังหาฯ 2,500 บาท',
+    effect: { kind: 'CASH', amount: 2500 },
+  },
+  {
+    id: 'chance-20',
+    deck: 'chance',
+    title: 'รถชนท้ายกลางแยกอโศก',
+    description: 'จ่ายค่าเสียหายซ่อมรถและคู่กรณี 750 บาท',
+    effect: { kind: 'CASH', amount: -750 },
+  },
+  {
+    id: 'chance-21',
+    deck: 'chance',
+    title: 'แวะเช็กอินแกรนด์คอนติเนนตัล',
+    description: 'เดินทางไปยัง #19 โรงแรมแกรนด์คอนติเนนตัล (หากผ่านจุดเริ่มต้น รับ 2,000 บาท)',
+    effect: { kind: 'MOVE_TO', tileIndex: 25, collectStartIfPassed: true },
+  },
+  {
+    id: 'chance-22',
+    deck: 'chance',
+    title: 'โบนัสผู้ถือหุ้นรายใหญ่',
+    description: 'เก็บเงินปันผลพิเศษจากผู้เล่นอื่นทุกคน คนละ 200 บาท',
+    effect: { kind: 'COLLECT_FROM_ALL', amountPerPlayer: 200 },
+  },
+  {
+    id: 'chance-23',
+    deck: 'chance',
+    title: 'พายุฤดูร้อนพัดป้ายโฆษณา',
+    description: 'ซ่อมแซมอาคารด่วน หลังละ 300 บาท และโรงแรมแห่งละ 900 บาท',
+    effect: { kind: 'REPAIRS', perHouse: 300, perHotel: 900 },
+  },
+  {
+    id: 'chance-24',
+    deck: 'chance',
+    title: 'เปลี่ยนใจเลี้ยวรถกลับ',
+    description: 'ถอยหลังกลับไป 2 ช่อง',
+    effect: { kind: 'MOVE_BACK', spaces: 2 },
+  },
 ] as const;
 
 export const CHEST_CARDS: readonly CardDefinition[] = [
@@ -667,6 +729,62 @@ export const CHEST_CARDS: readonly CardDefinition[] = [
     title: 'รางวัลงานหัตถกรรมท้องถิ่น',
     description: 'รับเงินรางวัลสนับสนุนงานศิลปะ 450 บาท',
     effect: { kind: 'CASH', amount: 450 },
+  },
+  {
+    id: 'chest-17',
+    deck: 'chest',
+    title: 'ขุดพบไหทองคำโบราณ',
+    description: 'ขายเข้าพิพิธภัณฑ์แห่งชาติ รับทรัพย์ก้อนโต 3,000 บาท',
+    effect: { kind: 'CASH', amount: 3000 },
+  },
+  {
+    id: 'chest-18',
+    deck: 'chest',
+    title: 'เก็บค่าคุ้มครองกิจการ',
+    description: 'ผู้เล่นอื่นทุกคนร่วมลงขันค่าบริหารตลาดให้คุณ คนละ 250 บาท',
+    effect: { kind: 'COLLECT_FROM_ALL', amountPerPlayer: 250 },
+  },
+  {
+    id: 'chest-19',
+    deck: 'chest',
+    title: 'ทริปทำบุญเมืองร้อยเกาะ',
+    description: 'เดินทางไปยัง #11 สุราษฎร์ธานี (หากผ่านจุดเริ่มต้น รับ 2,000 บาท)',
+    effect: { kind: 'MOVE_TO', tileIndex: 14, collectStartIfPassed: true },
+  },
+  {
+    id: 'chest-20',
+    deck: 'chest',
+    title: 'เหมาจ่ายค่าประกันภัยอาคาร',
+    description: 'ชำระเบี้ยประกันอัคคีภัยให้ธนาคาร 1,200 บาท',
+    effect: { kind: 'CASH', amount: -1200 },
+  },
+  {
+    id: 'chest-21',
+    deck: 'chest',
+    title: 'เปิดโต๊ะจีนฉลองครบรอบ',
+    description: 'จ่ายค่าจัดเลี้ยงขอบคุณผู้เล่นอื่นทุกคน คนละ 200 บาท',
+    effect: { kind: 'PAY_ALL', amountPerPlayer: 200 },
+  },
+  {
+    id: 'chest-22',
+    deck: 'chest',
+    title: 'ย้อนกลับมาตรวจตราทรัพย์สิน',
+    description: 'ถอยหลังกลับไป 4 ช่อง',
+    effect: { kind: 'MOVE_BACK', spaces: 4 },
+  },
+  {
+    id: 'chest-23',
+    deck: 'chest',
+    title: 'กำไรส่งออกสินค้าพรีเมียม',
+    description: 'ออเดอร์ต่างประเทศเข้าเป้า รับกำไรสุทธิ 1,750 บาท',
+    effect: { kind: 'CASH', amount: 1750 },
+  },
+  {
+    id: 'chest-24',
+    deck: 'chest',
+    title: 'บำรุงระบบประปาหมู่บ้าน',
+    description: 'จ่ายค่าปรับปรุงท่อประปาบ้านหลังละ 200 บาท และโรงแรมแห่งละ 800 บาท',
+    effect: { kind: 'REPAIRS', perHouse: 200, perHotel: 800 },
   },
 ] as const;
 

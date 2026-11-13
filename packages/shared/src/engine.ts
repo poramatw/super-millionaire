@@ -363,7 +363,7 @@ export function canMortgageTile(
 }
 
 /**
- * Create a brand-new GameState for 2–6 players (supporting any mix of humans and bots).
+ * Create a brand-new GameState for 2–8 players (supporting any mix of humans and bots).
  */
 export function createGameState(
   roomId: string,
@@ -371,8 +371,8 @@ export function createGameState(
   rng: () => number = Math.random,
 ): GameState {
   const totalSeats = config.totalSeats;
-  if (totalSeats < 2 || totalSeats > 6) {
-    throw new Error('Room must have between 2 and 6 seats.');
+  if (totalSeats < 2 || totalSeats > 8) {
+    throw new Error('Room must have between 2 and 8 seats.');
   }
 
   const slotMap = new Map<number, PlayerSlotConfig>();
@@ -571,12 +571,27 @@ function settlePendingDebtIfAble(state: GameState, entries: LedgerEntry[]): Game
   );
 }
 
+function rebuildShuffledDeck(
+  state: GameState,
+  deck: CardDeck,
+  rng: () => number,
+): string[] {
+  const pool = deck === 'chance' ? CHANCE_CARDS : CHEST_CARDS;
+  const jailCardId = deck === 'chance' ? 'chance-8' : 'chest-15';
+  const jailCardHeld = state.players.some((p) => p.heldJailCardDecks.includes(deck));
+  const ids = pool
+    .map((c) => c.id)
+    .filter((id) => !(jailCardHeld && id === jailCardId));
+  return shuffleIds(ids, rng);
+}
+
 function resolveCardEffect(
   state: GameState,
   playerId: string,
   card: CardDefinition,
   entries: LedgerEntry[],
   depth: number,
+  rng: () => number,
 ): GameState {
   const player = findPlayer(state, playerId)!;
   const effect = card.effect;
@@ -688,7 +703,7 @@ function resolveCardEffect(
           message: `${player.name} ผ่านจุดเริ่มต้น รับเงินเดือน ${formatBaht(START_BONUS)}`,
         });
       }
-      return resolveLanding(next, playerId, target, entries, depth + 1);
+      return resolveLanding(next, playerId, target, entries, depth + 1, rng);
     }
 
     case 'MOVE_BACK': {
@@ -697,7 +712,7 @@ function resolveCardEffect(
         ...p,
         position: target,
       }));
-      return resolveLanding(next, playerId, target, entries, depth + 1);
+      return resolveLanding(next, playerId, target, entries, depth + 1, rng);
     }
 
     case 'GO_TO_JAIL': {
@@ -726,27 +741,42 @@ function drawCard(
   deck: CardDeck,
   entries: LedgerEntry[],
   depth: number,
+  rng: () => number,
 ): GameState {
   const player = findPlayer(state, playerId)!;
   const deckKey = deck === 'chance' ? 'chanceDeck' : 'chestDeck';
-  const currentDeck = state[deckKey];
-  const fallbackPool = deck === 'chance' ? CHANCE_CARDS : CHEST_CARDS;
+  const sourceDeck =
+    state[deckKey].length > 0 ? state[deckKey] : rebuildShuffledDeck(state, deck, rng);
 
-  const cardId = currentDeck[0] ?? fallbackPool[0]!.id;
+  const cardId = sourceDeck[0]!;
   const card = CARD_BY_ID[cardId]!;
-  const restDeck = currentDeck.slice(1);
-  const updatedDeck =
-    card.effect.kind === 'GET_OUT_OF_JAIL_FREE' ? restDeck : [...restDeck, cardId];
+  const restDeck = sourceDeck.slice(1);
 
   let next: GameState = {
     ...state,
-    [deckKey]: updatedDeck,
+    [deckKey]: restDeck,
     lastCardDrawn: {
       card,
       playerId,
       turnNumber: state.turnNumber,
     },
   };
+
+  if (restDeck.length === 0) {
+    // Reshuffle remaining deck (accounting for GET_OUT_OF_JAIL_FREE if just kept in hand)
+    const heldAfterDraw =
+      card.effect.kind === 'GET_OUT_OF_JAIL_FREE'
+        ? state.players.map((p) =>
+            p.id === playerId
+              ? { ...p, heldJailCardDecks: [...p.heldJailCardDecks, deck] }
+              : p,
+          )
+        : state.players;
+    next = {
+      ...next,
+      [deckKey]: rebuildShuffledDeck({ ...next, players: heldAfterDraw }, deck, rng),
+    };
+  }
 
   next = appendEntry(next, entries, {
     type: deck === 'chance' ? 'CARD_CHANCE' : 'CARD_CHEST',
@@ -755,7 +785,7 @@ function drawCard(
     message: `${player.name} จั่วการ์ด${deck === 'chance' ? 'ประตูดวง' : 'หีบสมบัติ'}: "${card.title}" — ${card.description}`,
   });
 
-  return resolveCardEffect(next, playerId, card, entries, depth);
+  return resolveCardEffect(next, playerId, card, entries, depth, rng);
 }
 
 function resolveLanding(
@@ -764,6 +794,7 @@ function resolveLanding(
   tileIndex: number,
   entries: LedgerEntry[],
   depth = 0,
+  rng: () => number = Math.random,
 ): GameState {
   if (depth > 4) {
     return { ...state, phase: 'ACTION_PHASE' };
@@ -803,11 +834,11 @@ function resolveLanding(
     }
 
     case 'chance': {
-      return drawCard(state, playerId, 'chance', entries, depth);
+      return drawCard(state, playerId, 'chance', entries, depth, rng);
     }
 
     case 'chest': {
-      return drawCard(state, playerId, 'chest', entries, depth);
+      return drawCard(state, playerId, 'chest', entries, depth, rng);
     }
 
     case 'property':
@@ -884,6 +915,7 @@ export function rollDice(
     return fail(state, 'ไม่สามารถทอยลูกเต๋าในขั้นตอนนี้ได้');
   }
 
+  const rng = typeof rollInput === 'function' ? rollInput : Math.random;
   const dice = rollTwoDice(rollInput);
   const entries: LedgerEntry[] = [];
 
@@ -918,7 +950,7 @@ export function rollDice(
       next = { ...next, doublesCount: 0 };
       const target = (JAIL_TILE_INDEX + dice.total) % 40;
       next = updatePlayer(next, playerId, (p) => ({ ...p, position: target }));
-      return ok(resolveLanding(next, playerId, target, entries), entries);
+      return ok(resolveLanding(next, playerId, target, entries, 0, rng), entries);
     }
 
     const nextJailTurns = player.jailTurns + 1;
@@ -944,7 +976,7 @@ export function rollDice(
         });
         const target = (JAIL_TILE_INDEX + dice.total) % 40;
         next = updatePlayer(next, playerId, (p) => ({ ...p, position: target }));
-        return ok(resolveLanding(next, playerId, target, entries), entries);
+        return ok(resolveLanding(next, playerId, target, entries, 0, rng), entries);
       }
 
       // Must raise 500 THB bail via debt resolution
@@ -1011,7 +1043,7 @@ export function rollDice(
     });
   }
 
-  return ok(resolveLanding(next, playerId, newPos, entries), entries);
+  return ok(resolveLanding(next, playerId, newPos, entries, 0, rng), entries);
 }
 
 export function payJailBail(state: GameState, playerId: string): EngineResult {

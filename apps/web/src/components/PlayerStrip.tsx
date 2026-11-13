@@ -149,12 +149,12 @@ export function PlayerStrip({
               }}
               className={`flex items-center justify-between gap-2.5 rounded-xl border p-2.5 text-left transition ${
                 p.isBankrupt
-                  ? 'border-stone-800 bg-stone-950/60 opacity-55'
+                  ? 'border-stone-800/80 bg-stone-950/60 opacity-55'
                   : isTurn
-                    ? 'border-amber-300 bg-stone-900 shadow-[0_0_16px_rgba(251,191,36,0.2)] ring-1 ring-amber-300/60'
+                    ? 'border-amber-300/90 bg-gradient-to-r from-[#211b12] to-[#13291b] shadow-[0_0_18px_rgba(251,191,36,0.22)] ring-1 ring-amber-300/60'
                     : isInspected
-                      ? 'border-sky-400/60 bg-stone-900/90'
-                      : 'border-stone-800 bg-stone-900/75 hover:border-stone-600'
+                      ? 'border-sky-400/60 bg-stone-900/95'
+                      : 'border-amber-500/20 bg-stone-900/80 hover:border-amber-400/45'
               } ${hideFinances ? 'cursor-default' : ''}`}
             >
               <div className="flex min-w-0 items-center gap-2.5">

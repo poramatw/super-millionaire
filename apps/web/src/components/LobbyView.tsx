@@ -56,7 +56,7 @@ const BOT_STYLE_LABELS: Record<BotStyle, string> = {
 };
 
 function buildDefaultConfig(
-  totalSeats: 2 | 3 | 4 | 5 | 6 = 4,
+  totalSeats: 2 | 3 | 4 | 5 | 6 | 7 | 8 = 4,
   mode: 'mixed' | 'allBots' | 'allHumans' = 'mixed',
 ): RoomConfig {
   const slots: PlayerSlotConfig[] = Array.from({ length: totalSeats }, (_, idx) => {
@@ -91,7 +91,7 @@ export function LobbyView({
 }: LobbyViewProps) {
   const [playerName, setPlayerName] = useState(savedPlayerName || 'เศรษฐีสยาม');
   const [joinCode, setJoinCode] = useState(deepLinkRoomCode ?? '');
-  const [createSeats, setCreateSeats] = useState<2 | 3 | 4 | 5 | 6>(4);
+  const [createSeats, setCreateSeats] = useState<2 | 3 | 4 | 5 | 6 | 7 | 8>(4);
   const [createPreset, setCreatePreset] = useState<'mixed' | 'allBots' | 'allHumans'>('mixed');
   const [busy, setBusy] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
@@ -155,7 +155,7 @@ export function LobbyView({
     }
   };
 
-  const applySeatCount = (nextCount: 2 | 3 | 4 | 5 | 6) => {
+  const applySeatCount = (nextCount: 2 | 3 | 4 | 5 | 6 | 7 | 8) => {
     if (!roomState || !isHost) return;
     const slots: PlayerSlotConfig[] = Array.from({ length: nextCount }, (_, idx) => {
       const existing = roomState.config.slots[idx];
@@ -220,7 +220,7 @@ export function LobbyView({
                   ซุปเปอร์เศรษฐี
                 </h1>
                 <p className="max-w-xl text-sm leading-relaxed text-amber-50/90 sm:text-base">
-                  เกมเศรษฐีกระดานไทยระดับตำนาน ออนไลน์แบบเรียลไทม์ รองรับ ๒–๖ ที่นั่ง
+                  เกมเศรษฐีกระดานไทยระดับตำนาน ออนไลน์แบบเรียลไทม์ รองรับ ๒–๘ ที่นั่ง
                   ปรับแต่งได้อิสระทั้งผู้เล่นจริง AI บอท และโหมดผู้ชมบอทล้วน พร้อมนายธนาคารดูแลบัญชี
                 </p>
 
@@ -295,7 +295,7 @@ export function LobbyView({
                       สร้างห้องใหม่
                     </h2>
                     <p className="text-xs text-stone-600">
-                      กำหนดจำนวนที่นั่ง 2–6 คน และสลับคน/บอทได้ในห้อง
+                      กำหนดจำนวนที่นั่ง 2–8 คน และสลับคน/บอทได้ในห้อง
                     </p>
                   </div>
                 </div>
@@ -304,8 +304,8 @@ export function LobbyView({
                   <span className="text-xs font-bold uppercase tracking-wide text-stone-700">
                     จำนวนผู้เล่น (ที่นั่ง)
                   </span>
-                  <div className="mt-2 grid grid-cols-5 gap-2">
-                    {([2, 3, 4, 5, 6] as const).map((n) => (
+                  <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-7">
+                    {([2, 3, 4, 5, 6, 7, 8] as const).map((n) => (
                       <button
                         key={n}
                         type="button"
@@ -506,7 +506,7 @@ export function LobbyView({
           <div className="flex flex-col justify-between gap-4 border-b border-[#2a2118]/15 pb-4 sm:flex-row sm:items-center">
             <div>
               <h2 className="font-[var(--font-display)] text-lg font-bold">
-                ตั้งค่าที่นั่ง & ตัวเดิน (2–6 ที่นั่ง)
+                ตั้งค่าที่นั่ง & ตัวเดิน (2–8 ที่นั่ง)
               </h2>
               <p className="text-xs text-stone-600">
                 {isHost
@@ -518,7 +518,7 @@ export function LobbyView({
             {isHost && (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-bold text-stone-700">จำนวนที่นั่ง:</span>
-                {([2, 3, 4, 5, 6] as const).map((n) => (
+                {([2, 3, 4, 5, 6, 7, 8] as const).map((n) => (
                   <button
                     key={n}
                     type="button"
@@ -545,7 +545,7 @@ export function LobbyView({
           </div>
 
           {/* Seat Grid */}
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {roomState.seats.map((seat) => {
               const isMine = mySeatIndex === seat.seatIndex;
               const isBot = seat.kind === 'bot';

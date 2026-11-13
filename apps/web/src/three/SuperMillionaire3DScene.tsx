@@ -16,8 +16,29 @@ import {
   createCardDeckMesh,
   createDiceMesh,
   createMortgageBadgeTexture,
-  getDiceTargetEuler,
+  getDiceTargetQuaternion,
 } from './dice3dMesh';
+
+// Pre-allocated scratch math & building plinths outside animate() for steady 60 FPS
+const _camGoal = new THREE.Vector3();
+const _targetGoal = new THREE.Vector3();
+const _tumbleQuat = new THREE.Quaternion();
+const _tumbleAxis1 = new THREE.Vector3(1.1, 0.72, 0.58).normalize();
+const _tumbleAxis2 = new THREE.Vector3(-0.85, 0.68, 0.92).normalize();
+const _housePlinthGeo = new THREE.BoxGeometry(0.21, 0.032, 0.21);
+const _housePlinthMat = new THREE.MeshStandardMaterial({
+  color: '#15803D',
+  roughness: 0.62,
+  metalness: 0.08,
+});
+const _hotelPlinthGeo = new THREE.BoxGeometry(0.46, 0.055, 0.46);
+const _hotelPlinthMat = new THREE.MeshStandardMaterial({
+  color: '#D97706',
+  emissive: '#F59E0B',
+  emissiveIntensity: 0.35,
+  roughness: 0.26,
+  metalness: 0.64,
+});
 
 export interface SuperMillionaire3DSceneProps {
   gameState: GameState;
@@ -82,10 +103,8 @@ interface DiceThrowState {
   active: boolean;
   startMs: number;
   durationMs: number;
-  die1Target: THREE.Euler;
-  die2Target: THREE.Euler;
-  die1Start: THREE.Euler;
-  die2Start: THREE.Euler;
+  die1TargetQuat: THREE.Quaternion;
+  die2TargetQuat: THREE.Quaternion;
 }
 
 function getTravelYaw(tileIndex: number): number {
@@ -136,7 +155,7 @@ function getMultiTokenOffset(slotIndex: number, totalOnTile: number): { dx: numb
     return slotIndex === 0 ? { dx: -0.22, dz: -0.14 } : { dx: 0.22, dz: 0.14 };
   }
   const angle = (slotIndex / totalOnTile) * Math.PI * 2 - Math.PI / 4;
-  const radius = totalOnTile <= 4 ? 0.25 : 0.29;
+  const radius = totalOnTile <= 4 ? 0.25 : totalOnTile <= 6 ? 0.3 : 0.35;
   return {
     dx: Math.cos(angle) * radius,
     dz: Math.sin(angle) * radius,
@@ -219,7 +238,7 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     const width = Math.max(container.clientWidth, 280);
     const height = Math.max(container.clientHeight, 280);
 
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
     renderer.setSize(width, height, false);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -473,11 +492,9 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
       diceThrow: {
         active: false,
         startMs: 0,
-        durationMs: 940,
-        die1Target: new THREE.Euler(0, 0.25, 0),
-        die2Target: new THREE.Euler(0, -0.32, 0),
-        die1Start: new THREE.Euler(),
-        die2Start: new THREE.Euler(),
+        durationMs: 880,
+        die1TargetQuat: getDiceTargetQuaternion(1, 0.24),
+        die2TargetQuat: getDiceTargetQuaternion(1, -0.28),
       },
       cameraLerp: {
         active: false,
@@ -650,31 +667,18 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         );
 
         const spinDecay = 1 - rotEase;
-        bundle.die1Mesh.rotation.set(
-          bundle.diceThrow.die1Target.x + spinDecay * Math.PI * 6,
-          0.28 + spinDecay * Math.PI * 4,
-          bundle.diceThrow.die1Target.z + spinDecay * Math.PI * 4,
-        );
-        bundle.die2Mesh.rotation.set(
-          bundle.diceThrow.die2Target.x - spinDecay * Math.PI * 6,
-          -0.32 - spinDecay * Math.PI * 4,
-          bundle.diceThrow.die2Target.z + spinDecay * Math.PI * 4,
-        );
+        _tumbleQuat.setFromAxisAngle(_tumbleAxis1, spinDecay * Math.PI * 5.4);
+        bundle.die1Mesh.quaternion.copy(_tumbleQuat).multiply(bundle.diceThrow.die1TargetQuat);
+
+        _tumbleQuat.setFromAxisAngle(_tumbleAxis2, -spinDecay * Math.PI * 5.2);
+        bundle.die2Mesh.quaternion.copy(_tumbleQuat).multiply(bundle.diceThrow.die2TargetQuat);
 
         if (progress >= 1) {
           bundle.diceThrow.active = false;
           bundle.die1Mesh.position.set(-0.52, 0.26, 0.36);
           bundle.die2Mesh.position.set(0.52, 0.26, -0.26);
-          bundle.die1Mesh.rotation.set(
-            bundle.diceThrow.die1Target.x,
-            0.28,
-            bundle.diceThrow.die1Target.z,
-          );
-          bundle.die2Mesh.rotation.set(
-            bundle.diceThrow.die2Target.x,
-            -0.32,
-            bundle.diceThrow.die2Target.z,
-          );
+          bundle.die1Mesh.quaternion.copy(bundle.diceThrow.die1TargetQuat);
+          bundle.die2Mesh.quaternion.copy(bundle.diceThrow.die2TargetQuat);
         }
       }
 
@@ -742,24 +746,22 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         !bundle.userManualOverride
       ) {
         if (bundle.diceThrow.active) {
-          // Brief center framing so both bouncing dice are clearly visible
-          camera.position.lerp(new THREE.Vector3(0, 9.6, 8.9), 0.08);
-          controls.target.lerp(new THREE.Vector3(0, 0.1, 0), 0.1);
+          // Brief center framing so both bouncing dice are clearly visible (zero per-frame alloc)
+          _camGoal.set(0, 9.6, 8.9);
+          _targetGoal.set(0, 0.1, 0);
+          camera.position.lerp(_camGoal, 0.085);
+          controls.target.lerp(_targetGoal, 0.1);
         } else {
           const focusId = currentProps.animatingPlayerId ?? currentPlayer?.id;
           const focusToken = focusId ? bundle.tokens.get(focusId) : undefined;
           if (focusToken) {
             const tx = focusToken.root.position.x;
             const tz = focusToken.root.position.z;
-            const desiredTarget = new THREE.Vector3(tx * 0.62, 0.22, tz * 0.62);
+            _targetGoal.set(tx * 0.62, 0.22, tz * 0.62);
             const zoomHeight = currentProps.animatingPlayerId ? 6.8 : 7.5;
-            const desiredCam = new THREE.Vector3(
-              tx * 0.62,
-              zoomHeight,
-              tz * 0.62 + 7.1,
-            );
-            controls.target.lerp(desiredTarget, 0.075);
-            camera.position.lerp(desiredCam, 0.06);
+            _camGoal.set(tx * 0.62, zoomHeight, tz * 0.62 + 7.1);
+            controls.target.lerp(_targetGoal, 0.08);
+            camera.position.lerp(_camGoal, 0.065);
           }
         }
       }
@@ -861,22 +863,43 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
       const group = new THREE.Group();
       const shouldPop = isNewBuild && props.recentlyBuilt?.tileIndex === deed.tileIndex;
 
-      positions.forEach((pos) => {
+      positions.forEach((pos, pIdx) => {
         const slot = new THREE.Group();
         slot.position.set(pos.x, 0, pos.z);
         slot.rotation.y = pos.rotY;
 
-        const targetSize = deed.hasHotel ? 0.44 : 0.25;
+        // Grounded luxury plinth so houses & hotels stand prominently above the board
+        const plinthHeight = deed.hasHotel ? 0.055 : 0.032;
+        const plinth = new THREE.Mesh(
+          deed.hasHotel ? _hotelPlinthGeo : _housePlinthGeo,
+          deed.hasHotel ? _hotelPlinthMat : _housePlinthMat,
+        );
+        plinth.position.y = plinthHeight / 2;
+        plinth.castShadow = true;
+        plinth.receiveShadow = true;
+        slot.add(plinth);
+
+        const modelAnchor = new THREE.Group();
+        modelAnchor.position.y = plinthHeight;
+        slot.add(modelAnchor);
+
+        const targetSize = deed.hasHotel ? 0.72 : 0.36;
         const kind = deed.hasHotel ? 'hotel' : 'house';
-        const url = deed.hasHotel ? MODEL_URLS.hotel : MODEL_URLS.house;
+        const url = deed.hasHotel
+          ? deed.tileIndex % 2 === 0
+            ? MODEL_URLS.hotel
+            : MODEL_URLS.hotelAlt
+          : pIdx % 2 === 0
+            ? MODEL_URLS.house
+            : MODEL_URLS.houseAlt;
         const fallback = createFallbackModel(kind, targetSize);
-        slot.add(fallback);
+        modelAnchor.add(fallback);
 
         loadNormalizedGLB(url, targetSize)
           .then((model) => {
-            if (!slot.parent) return;
-            slot.remove(fallback);
-            slot.add(model);
+            if (!modelAnchor.parent) return;
+            modelAnchor.remove(fallback);
+            modelAnchor.add(model);
           })
           .catch(() => {
             // Keep clean geometric fallback
@@ -1047,8 +1070,8 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     const faces = props.gameState.lastDice ?? props.thrownDiceFaces;
     const d1 = faces?.die1 ?? 1;
     const d2 = faces?.die2 ?? 1;
-    const target1 = getDiceTargetEuler(d1);
-    const target2 = getDiceTargetEuler(d2);
+    const target1Quat = getDiceTargetQuaternion(d1, 0.24);
+    const target2Quat = getDiceTargetQuaternion(d2, -0.28);
 
     if (props.throwKey > 0 && props.throwKey !== bundle.lastThrowKey) {
       bundle.lastThrowKey = props.throwKey;
@@ -1056,18 +1079,16 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
       bundle.diceThrow = {
         active: true,
         startMs: performance.now(),
-        durationMs: 940,
-        die1Target: target1,
-        die2Target: target2,
-        die1Start: bundle.die1Mesh.rotation.clone(),
-        die2Start: bundle.die2Mesh.rotation.clone(),
+        durationMs: 880,
+        die1TargetQuat: target1Quat,
+        die2TargetQuat: target2Quat,
       };
     } else if (bundle.diceThrow.active) {
-      bundle.diceThrow.die1Target = target1;
-      bundle.diceThrow.die2Target = target2;
+      bundle.diceThrow.die1TargetQuat = target1Quat;
+      bundle.diceThrow.die2TargetQuat = target2Quat;
     } else {
-      bundle.die1Mesh.rotation.set(target1.x, 0.28, target1.z);
-      bundle.die2Mesh.rotation.set(target2.x, -0.32, target2.z);
+      bundle.die1Mesh.quaternion.copy(target1Quat);
+      bundle.die2Mesh.quaternion.copy(target2Quat);
     }
   }, [props.throwKey, props.gameState.lastDice, props.thrownDiceFaces]);
 

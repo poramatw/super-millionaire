@@ -131,31 +131,31 @@ export function TurnControls({
   const activeDice = isThrowingDice && thrownDiceFaces ? thrownDiceFaces : gameState.lastDice;
 
   return (
-    <div className="cardstock-texture deed-card-bevel flex flex-col gap-3 rounded-2xl border-2 border-[#2a2118] p-3.5 text-[#1c1814]">
+    <div className="luxury-glass-panel flex flex-col gap-3 rounded-2xl p-3.5 text-amber-50">
       {/* Turn Status Header + 2-Dice Tray */}
-      <div className="flex items-center justify-between gap-3 border-b border-[#2a2118]/15 pb-3">
+      <div className="flex items-center justify-between gap-3 border-b border-amber-500/20 pb-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span
-              className="h-3 w-3 shrink-0 rounded-full border border-black/30"
-              style={{ backgroundColor: currentPlayer.color }}
+              className="h-3 w-3 shrink-0 rounded-full border border-white/50 shadow-[0_0_8px_currentColor]"
+              style={{ backgroundColor: currentPlayer.color, color: currentPlayer.color }}
             />
-            <span className="truncate font-[var(--font-display)] text-sm font-extrabold">
+            <span className="truncate font-[var(--font-display)] text-sm font-extrabold text-amber-100">
               {isMyTurn ? 'ตาของคุณ!' : `ตาของ ${currentPlayer.name}`}
             </span>
             {currentPlayer.kind === 'bot' && (
-              <span className="rounded bg-purple-700 px-1.5 py-0.5 text-[10px] font-bold text-white">
+              <span className="rounded-md border border-purple-400/40 bg-purple-900/80 px-1.5 py-0.5 text-[10px] font-bold text-purple-200">
                 AI
               </span>
             )}
           </div>
-          <p className="mt-0.5 text-xs font-medium text-stone-700">
+          <p className="mt-0.5 text-xs font-medium text-amber-100/75">
             {phaseText[gameState.phase]}
           </p>
           <button
             type="button"
             onClick={() => onSelectTile(currentTile.index)}
-            className="mt-1 text-left text-[11px] font-semibold text-[#1b7a43] underline decoration-dotted underline-offset-2 hover:brightness-90"
+            className="mt-1 text-left text-[11px] font-semibold text-emerald-300 underline decoration-dotted underline-offset-2 hover:text-emerald-200"
           >
             ยืนอยู่ที่: {currentTile.deedNumber !== undefined ? `#${currentTile.deedNumber} ` : ''}
             {currentTile.name}
@@ -165,7 +165,7 @@ export function TurnControls({
         {/* 2-Dice Tray */}
         <div
           key={throwKey}
-          className="flex shrink-0 flex-col items-center gap-1 rounded-xl border border-[#2a2118]/25 bg-[#1C6B3A] px-2.5 py-2 shadow-inner"
+          className="flex shrink-0 flex-col items-center gap-1 rounded-xl border border-amber-400/35 bg-[radial-gradient(circle_at_top,#1f7341,#0f4023)] px-2.5 py-2 shadow-inner"
         >
           {activeDice ? (
             <>
@@ -196,7 +196,7 @@ export function TurnControls({
 
       {/* Waiting message when not my turn */}
       {!isMyTurn && gameState.phase !== 'GAME_OVER' && (
-        <div className="rounded-xl border border-[#2a2118]/15 bg-[#ede1c4]/80 px-3 py-2 text-center text-xs font-semibold text-stone-700">
+        <div className="rounded-xl border border-amber-500/20 bg-stone-950/55 px-3 py-2 text-center text-xs font-semibold text-amber-100/80">
           {isSpectator
             ? 'คุณกำลังรับชมเกม (โหมดผู้ชม — บอท/ผู้เล่นกำลังดำเนินการ)'
             : `กำลังรอ ${currentPlayer.name} ตัดสินใจ (ไม่มีจับเวลา)`}
@@ -241,9 +241,9 @@ export function TurnControls({
         <button
           type="button"
           onClick={() => onDispatchAction({ type: 'ROLL_DICE', playerId: effectivePlayerId })}
-          className="tactile-btn flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#143d25] bg-[#1b7a43] px-4 py-3 text-base font-extrabold text-amber-50 shadow-md hover:brightness-110"
+          className="tactile-btn flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300/60 bg-gradient-to-b from-[#228d4f] to-[#155e34] px-4 py-3 text-base font-extrabold text-amber-50 shadow-[0_6px_18px_rgba(16,185,129,0.28)] hover:brightness-110"
         >
-          <Dices className="h-5 w-5" />
+          <Dices className="h-5 w-5 text-amber-200" />
           <span>{canRollDoubles ? 'ทอยเบิ้ลอีกครั้ง!' : 'ทอยลูกเต๋า 2 ลูก'}</span>
         </button>
       )}
@@ -447,7 +447,7 @@ export function TurnControls({
             <button
               type="button"
               onClick={onOpenTradeModal}
-              className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-[#1c4e8a] bg-[#1c4e8a] px-3 py-2.5 text-sm font-bold text-white shadow hover:brightness-110"
+              className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border border-sky-400/50 bg-gradient-to-b from-[#2260aa] to-[#163f72] px-3 py-2.5 text-sm font-bold text-white shadow hover:brightness-110"
             >
               <ArrowLeftRight className="h-4 w-4" />
               <span>ยื่นแลกเปลี่ยน</span>
@@ -458,7 +458,7 @@ export function TurnControls({
             <button
               type="button"
               onClick={() => onDispatchAction({ type: 'END_TURN', playerId: effectivePlayerId })}
-              className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-[#7f1319] bg-[#c8232c] px-4 py-2.5 text-sm font-extrabold text-white shadow-md hover:brightness-110"
+              className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border border-rose-400/50 bg-gradient-to-b from-[#d92b35] to-[#9e1a22] px-4 py-2.5 text-sm font-extrabold text-white shadow-md hover:brightness-110"
             >
               <CheckCircle2 className="h-4 w-4" />
               <span>จบเทิร์น</span>

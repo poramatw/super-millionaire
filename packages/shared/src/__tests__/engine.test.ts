@@ -66,8 +66,8 @@ describe('boardData & banknotes', () => {
     expect(BOARD_TILES[39]?.name).toBe('เสาชิงช้า');
     expect(BOARD_TILES[39]?.deedNumber).toBe(29);
 
-    expect(CHANCE_CARDS).toHaveLength(16);
-    expect(CHEST_CARDS).toHaveLength(16);
+    expect(CHANCE_CARDS).toHaveLength(24);
+    expect(CHEST_CARDS).toHaveLength(24);
   });
 
   it('starts every player with 15,000 THB and exact Thai banknote breakdown', () => {
@@ -588,5 +588,57 @@ describe('all-bot automated simulation sanity check', () => {
       expect(sumBanknotes(p.banknotes)).toBe(p.cash);
       expect(p.cash).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it('supports an 8-player game cleanly and cycles shuffled 24-card decks without repeats', () => {
+    const rng = createSeededRng(8080);
+    const eightConfig: RoomConfig = {
+      totalSeats: 8,
+      slots: Array.from({ length: 8 }, (_, idx) => ({
+        seatIndex: idx,
+        kind: 'bot' as const,
+        name: `เศรษฐี-${idx + 1}`,
+        botStyle: 'balanced' as const,
+      })),
+    };
+
+    let state = createGameState('room-8p', eightConfig, rng);
+    expect(state.players).toHaveLength(8);
+    expect(new Set(state.players.map((p) => p.color)).size).toBe(8);
+    expect(new Set(state.players.map((p) => p.tokenId)).size).toBe(8);
+    expect(state.chanceDeck).toHaveLength(24);
+    expect(state.chestDeck).toHaveLength(24);
+
+    // Draw all 24 Chance cards across forced landings and verify zero duplicate IDs before reshuffle
+    const seenChance = new Set<string>();
+    for (let i = 0; i < 24; i++) {
+      state = {
+        ...state,
+        phase: 'AWAIT_ROLL',
+        hasRolledThisTurn: false,
+        doublesCount: 0,
+        players: state.players.map((p, idx) =>
+          idx === state.currentTurnIndex
+            ? { ...p, position: 4, inJail: false, isBankrupt: false }
+            : p,
+        ),
+      };
+      const pid = state.players[state.currentTurnIndex]!.id;
+      const rolled = rollDice(state, pid, [1, 2]); // lands on tile 7 (chance)
+      expect(rolled.ok).toBe(true);
+      const drawnId = rolled.state.lastCardDrawn?.card.id;
+      expect(drawnId).toBeDefined();
+      seenChance.add(drawnId!);
+      state = {
+        ...rolled.state,
+        phase: 'ACTION_PHASE',
+        pendingDecisionTileIndex: null,
+        pendingDebt: null,
+      };
+    }
+
+    expect(seenChance.size).toBe(24);
+    // Deck automatically reshuffled for the next cycle (23 if chance-8 Jail-Free card is held, else 24)
+    expect(state.chanceDeck.length).toBeGreaterThanOrEqual(23);
   });
 });

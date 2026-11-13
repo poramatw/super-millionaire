@@ -794,13 +794,13 @@ export default function App() {
       ) : (
         <div className="flex min-h-dvh w-full flex-col">
           {/* Top Compact Game Header */}
-          <header className="safe-pt sticky top-0 z-30 border-b border-amber-500/25 bg-stone-950/95 px-3 py-2 backdrop-blur-md sm:px-5">
+          <header className="safe-pt luxury-header-bar sticky top-0 z-30 px-3 py-2 backdrop-blur-md sm:px-5">
             <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-                <span className="truncate font-[var(--font-display)] text-base font-extrabold text-amber-300 sm:text-lg">
+                <span className="truncate font-[var(--font-display)] text-base font-extrabold tracking-tight text-amber-200 drop-shadow-[0_1px_6px_rgba(245,158,11,0.28)] sm:text-lg">
                   ซุปเปอร์เศรษฐี
                 </span>
-                <span className="mono-num rounded-md border border-amber-400/40 bg-amber-400/15 px-2 py-0.5 text-xs font-extrabold tracking-wider text-amber-200">
+                <span className="mono-num rounded-md border border-amber-400/50 bg-gradient-to-b from-amber-400/20 to-amber-600/10 px-2 py-0.5 text-xs font-extrabold tracking-wider text-amber-200 shadow-inner">
                   {roomState.roomId}
                 </span>
                 {isLocalOffline && (
@@ -949,16 +949,16 @@ export default function App() {
               </div>
 
               {/* Compact Live Banker Banner on Desktop */}
-              <div className="hidden items-center gap-2.5 rounded-xl border border-amber-500/30 bg-stone-900/90 px-3 py-2 lg:flex">
+              <div className="luxury-glass-panel hidden items-center gap-2.5 rounded-xl px-3 py-2 lg:flex">
                 <BankerAvatar size={32} className="shrink-0" />
-                <p className="line-clamp-2 flex-1 text-xs font-medium text-amber-100">
+                <p className="line-clamp-2 flex-1 text-xs font-medium text-amber-100/95">
                   {gameState.banker.ledger[gameState.banker.ledger.length - 1]?.message ??
                     'นายธนาคารพร้อมให้บริการ'}
                 </p>
               </div>
 
               {/* Desktop Sidebar Tabs */}
-              <div className="hidden grid-cols-3 gap-1.5 lg:grid">
+              <div className="hidden grid-cols-3 gap-1.5 rounded-xl border border-amber-500/20 bg-stone-950/75 p-1 lg:grid">
                 {(
                   [
                     {
@@ -975,10 +975,10 @@ export default function App() {
                     key={id}
                     type="button"
                     onClick={() => setSidebarTab(id)}
-                    className={`tactile-btn flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-bold ${
+                    className={`tactile-btn flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-bold transition ${
                       sidebarTab === id
-                        ? 'border-amber-400 bg-amber-400 text-stone-950 shadow'
-                        : 'border-stone-700 bg-stone-900 text-stone-300 hover:bg-stone-800'
+                        ? 'border-amber-300/80 bg-gradient-to-b from-amber-300 to-amber-500 text-stone-950 shadow-[0_2px_10px_rgba(245,158,11,0.35)]'
+                        : 'border-transparent bg-transparent text-stone-300 hover:bg-stone-800/80 hover:text-amber-100'
                     }`}
                   >
                     <Icon className="h-3.5 w-3.5" />

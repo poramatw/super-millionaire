@@ -40,7 +40,7 @@ export interface PlayerSlotConfig {
 }
 
 export interface RoomConfig {
-  totalSeats: 2 | 3 | 4 | 5 | 6;
+  totalSeats: 2 | 3 | 4 | 5 | 6 | 7 | 8;
   slots: PlayerSlotConfig[];
 }
 

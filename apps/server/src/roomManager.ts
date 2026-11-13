@@ -100,8 +100,16 @@ function sanitizeName(name: string | undefined, fallback: string): string {
   return trimmed.slice(0, 32);
 }
 
-function isValidTotalSeats(value: unknown): value is 2 | 3 | 4 | 5 | 6 {
-  return value === 2 || value === 3 || value === 4 || value === 5 || value === 6;
+function isValidTotalSeats(value: unknown): value is 2 | 3 | 4 | 5 | 6 | 7 | 8 {
+  return (
+    value === 2 ||
+    value === 3 ||
+    value === 4 ||
+    value === 5 ||
+    value === 6 ||
+    value === 7 ||
+    value === 8
+  );
 }
 
 function normalizeBotStyle(style: unknown): BotStyle {
@@ -133,7 +141,7 @@ function cloneRoomState(room: RoomState): RoomState {
 
 /**
  * Authoritative multiplayer room manager for ซุปเปอร์เศรษฐี (Super Millionaire No. 9028).
- * Handles 2-6 seat custom rooms, spectators, sessionToken reconnects, CSPRNG dice,
+ * Handles 2-8 seat custom rooms, spectators, sessionToken reconnects, CSPRNG dice,
  * zero human turn timers, and stepped AI bot scheduling.
  */
 export class RoomManager {

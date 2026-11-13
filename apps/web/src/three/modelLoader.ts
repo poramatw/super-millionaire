@@ -9,9 +9,13 @@ export const MODEL_URLS = {
     '/models/car/taxi.glb', // 3: ตุ๊กตุ๊ก/แท็กซี่
     '/models/mini-characters/character-male-a.glb', // 4: นักธุรกิจ/หมวกเศรษฐี
     '/models/pirate/chest.glb', // 5: หีบสมบัติ/ถุงทอง
+    '/models/car/race-future.glb', // 6: รถซุปเปอร์คาร์
+    '/models/cube-pets/animal-lion.glb', // 7: ราชสีห์ทอง
   ],
-  house: '/models/city-suburban/building-type-b.glb',
-  hotel: '/models/city-commercial/building-skyscraper-a.glb',
+  house: '/models/city-suburban/building-type-d.glb',
+  houseAlt: '/models/city-suburban/building-type-f.glb',
+  hotel: '/models/city-commercial/building-skyscraper-b.glb',
+  hotelAlt: '/models/city-commercial/building-skyscraper-c.glb',
   coin: '/models/toy-car/item-coin-gold.glb',
 } as const;
 

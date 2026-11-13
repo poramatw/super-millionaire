@@ -130,6 +130,8 @@ export function createDiceMesh(): {
   };
 }
 
+const WORLD_UP_Y = new THREE.Vector3(0, 1, 0);
+
 export function getDiceTargetEuler(value: number): THREE.Euler {
   switch (value) {
     case 1:
@@ -146,6 +148,16 @@ export function getDiceTargetEuler(value: number): THREE.Euler {
     default:
       return new THREE.Euler(Math.PI, 0, 0);
   }
+}
+
+/**
+ * Computes exact flat-resting quaternion so the chosen pip value faces +Y (straight up)
+ * while spinning strictly around the world Y axis — never tilting on an edge/corner.
+ */
+export function getDiceTargetQuaternion(value: number, worldYawRad = 0): THREE.Quaternion {
+  const faceQuat = new THREE.Quaternion().setFromEuler(getDiceTargetEuler(value));
+  const yawQuat = new THREE.Quaternion().setFromAxisAngle(WORLD_UP_Y, worldYawRad);
+  return yawQuat.multiply(faceQuat);
 }
 
 export function createCardDeckMesh(

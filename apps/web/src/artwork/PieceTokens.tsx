@@ -7,6 +7,8 @@ export const TOKEN_NAMES = [
   'ตุ๊กตุ๊ก',
   'หมวกเศรษฐี',
   'ถุงทอง',
+  'รถซุปเปอร์คาร์',
+  'ราชสีห์ทอง',
 ] as const;
 
 export interface PlayerTokenProps {
@@ -37,7 +39,7 @@ export interface Dice3DProps {
 
 export function PlayerToken({ tokenId, color, size = 36, className = '' }: PlayerTokenProps) {
   const uid = useId().replace(/:/g, '');
-  const idx = ((Math.trunc(tokenId) % 6) + 6) % 6;
+  const idx = ((Math.trunc(tokenId) % 8) + 8) % 8;
 
   return (
     <svg
@@ -362,6 +364,70 @@ export function PlayerToken({ tokenId, color, size = 36, className = '' }: Playe
           >
             ฿
           </text>
+        </g>
+      )}
+
+      {idx === 6 && (
+        /* 6: รถซุปเปอร์คาร์ (Sleek Low-Slung Supercar) */
+        <g>
+          {/* Rear GT Wing */}
+          <path
+            d="M11 33 L19 33 L21 38 L14 38 Z"
+            fill={`url(#${uid}-metal)`}
+            stroke="#1b1510"
+            strokeWidth="1.5"
+          />
+          {/* Aerodynamic wedge chassis */}
+          <path
+            d="M9 46 C9 39 14 37 22 36 L29 27 C34 25 41 25 46 31 L55 37 C57.5 39 58 43 56 47 L11 47 Z"
+            fill={color}
+            stroke="#1b1510"
+            strokeWidth="2"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M9 46 C9 39 14 37 22 36 L29 27 C34 25 41 25 46 31 L55 37 C57.5 39 58 43 56 47 L11 47 Z"
+            fill={`url(#${uid}-sheen)`}
+          />
+          {/* Panoramic cockpit canopy */}
+          <path d="M26 35 L31 28.5 L42 29 L46 35 Z" fill="#172536" stroke="#1b1510" strokeWidth="1.2" />
+          {/* Racing gold stripe & wheels */}
+          <path d="M16 40 L52 40" stroke={`url(#${uid}-metal)`} strokeWidth="2.2" strokeLinecap="round" />
+          <circle cx="20" cy="47.5" r="5.6" fill="#231c15" stroke="#1b1510" strokeWidth="1.5" />
+          <circle cx="20" cy="47.5" r="2.4" fill={`url(#${uid}-metal)`} />
+          <circle cx="45" cy="47.5" r="5.6" fill="#231c15" stroke="#1b1510" strokeWidth="1.5" />
+          <circle cx="45" cy="47.5" r="2.4" fill={`url(#${uid}-metal)`} />
+        </g>
+      )}
+
+      {idx === 7 && (
+        /* 7: ราชสีห์ทอง (Sculpted Crowned Royal Lion Bust) */
+        <g>
+          {/* Radiant royal mane */}
+          <path
+            d="M32 14 L38 18 L45 17 L47 24 L52 29 L48 36 L50 43 L43 46 L38 51 L32 49 L26 51 L21 46 L14 43 L16 36 L12 29 L17 24 L19 17 L26 18 Z"
+            fill={color}
+            stroke="#1b1510"
+            strokeWidth="1.9"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M32 14 L38 18 L45 17 L47 24 L52 29 L48 36 L50 43 L43 46 L38 51 L32 49 L26 51 L21 46 L14 43 L16 36 L12 29 L17 24 L19 17 L26 18 Z"
+            fill={`url(#${uid}-sheen)`}
+          />
+          {/* Lion face shield */}
+          <circle cx="32" cy="34" r="10.5" fill={`url(#${uid}-metal)`} stroke="#1b1510" strokeWidth="1.4" />
+          <circle cx="28" cy="31.5" r="1.6" fill="#1b1510" />
+          <circle cx="36" cy="31.5" r="1.6" fill="#1b1510" />
+          <path d="M29.5 36.5 L34.5 36.5 L32 39.5 Z" fill="#2b1c08" />
+          {/* Royal crown */}
+          <path
+            d="M23 19 L25 11 L32 15 L39 11 L41 19 Z"
+            fill={`url(#${uid}-metal)`}
+            stroke="#1b1510"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
         </g>
       )}
       </g>

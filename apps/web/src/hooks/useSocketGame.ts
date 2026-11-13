@@ -148,7 +148,7 @@ function normalizeLocalConfig(
   playerName: string,
   partial?: Partial<RoomConfig>,
 ): { config: RoomConfig; humanSeatIndex: number | null } {
-  const totalSeats = (partial?.totalSeats ?? 4) as 2 | 3 | 4 | 5 | 6;
+  const totalSeats = (partial?.totalSeats ?? 4) as 2 | 3 | 4 | 5 | 6 | 7 | 8;
   const slotMap = new Map<number, PlayerSlotConfig>();
   for (const s of partial?.slots ?? []) {
     slotMap.set(s.seatIndex, s);
