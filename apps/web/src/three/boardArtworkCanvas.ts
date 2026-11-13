@@ -735,6 +735,7 @@ export function renderPerimeterTiles(
   cell: number,
   drawTileArtworkGlyph: TileGlyphDrawer,
   boardImg: HTMLImageElement | null,
+  topOrientation: 'south' | 'north' = 'south',
 ): void {
   const hw = cell / 2;
   const hh = cell / 2;
@@ -749,6 +750,7 @@ export function renderPerimeterTiles(
     ctx.translate(tx + cell / 2, ty + cell / 2);
 
     if (edge === 'left') ctx.rotate(Math.PI / 2);
+    else if (edge === 'top' && topOrientation === 'north') ctx.rotate(Math.PI);
     else if (edge === 'right') ctx.rotate(-Math.PI / 2);
 
     const isDarkCard = tile.type === 'chest' || tile.type === 'chance';
@@ -771,7 +773,7 @@ export function renderPerimeterTiles(
         ctx.beginPath();
         ctx.rect(-hw + 3, -hh + 3, cell - 6, cell - 6);
         ctx.clip();
-        if (tile.index === 20 || tile.index === 30) {
+        if (topOrientation === 'south' && (tile.index === 20 || tile.index === 30)) {
           ctx.rotate(Math.PI);
         }
         ctx.drawImage(
@@ -787,6 +789,9 @@ export function renderPerimeterTiles(
         );
         ctx.restore();
       } else {
+        if (topOrientation === 'north' && (tile.index === 20 || tile.index === 30)) {
+          ctx.rotate(Math.PI);
+        }
         drawTileArtworkGlyph(ctx, tile, 0, -cell * 0.04, cell * 0.92);
         ctx.fillStyle = '#1C1814';
         ctx.font = '800 22px "Prompt", "Noto Sans Thai", sans-serif';
@@ -795,9 +800,9 @@ export function renderPerimeterTiles(
       }
     } else {
       const bandH = cell * 0.22;
-      const isTopEdge = edge === 'top';
-      const bandY = isTopEdge ? hh - bandH : -hh;
-      const dividerY = isTopEdge ? bandY : bandY + bandH;
+      const isTopSouth = edge === 'top' && topOrientation === 'south';
+      const bandY = isTopSouth ? hh - bandH : -hh;
+      const dividerY = isTopSouth ? bandY : bandY + bandH;
       const meta = tile.colorGroup ? COLOR_GROUP_META[tile.colorGroup] : null;
       if (meta) {
         ctx.fillStyle = meta.bandBg;
@@ -844,11 +849,11 @@ export function renderPerimeterTiles(
       const priceVal = tile.price ?? tile.taxAmount;
       const hasFooterVal = Boolean(priceVal);
 
-      // Authentic illustration artwork window for all edge tiles (viewer-upright on top edge)
-      const artTop = isTopEdge
+      // Authentic illustration artwork window for all edge tiles
+      const artTop = isTopSouth
         ? -hh + (hasFooterVal ? 28 : 10)
         : -hh + bandH + 6;
-      const artH = isTopEdge ? cell * (hasFooterVal ? 0.39 : 0.45) : cell * 0.48;
+      const artH = isTopSouth ? cell * (hasFooterVal ? 0.39 : 0.45) : cell * 0.48;
       if (boardImg && rect9028) {
         drawTileMiddleIllustration(
           ctx,
@@ -870,14 +875,14 @@ export function renderPerimeterTiles(
       const fontSize = nameLen > 12 ? 15.5 : nameLen > 9 ? 17.5 : 19.5;
       ctx.font = `800 ${fontSize}px "Prompt", "Noto Sans Thai", sans-serif`;
       ctx.textAlign = 'center';
-      const nameY = isTopEdge ? hh - bandH - 9 : hh - (hasFooterVal ? 31 : 14);
+      const nameY = isTopSouth ? hh - bandH - 9 : hh - (hasFooterVal ? 31 : 14);
       ctx.fillText(tile.name, 0, nameY);
 
       // Crisp price/tax pill at outer rim
       if (priceVal) {
         ctx.fillStyle = tile.taxAmount ? '#991B1B' : '#1C1814';
         ctx.beginPath();
-        const priceBoxY = isTopEdge ? -hh + 5 : hh - 24;
+        const priceBoxY = isTopSouth ? -hh + 5 : hh - 24;
         ctx.roundRect(-hw + 22, priceBoxY, cell - 44, 19, 4);
         ctx.fill();
         ctx.fillStyle = '#FDE047';

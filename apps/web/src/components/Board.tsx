@@ -4,7 +4,7 @@ import {
   type DiceRollResult,
   type GameState,
 } from '@super-millionaire/shared';
-import { Box, Crosshair, Layers, RotateCcw } from 'lucide-react';
+import { Box, Crosshair, Layers, LocateFixed, RotateCcw } from 'lucide-react';
 import { SuperMillionaire3DScene } from '../three/SuperMillionaire3DScene';
 
 export interface RecentlyBuiltFx {
@@ -33,6 +33,9 @@ export interface BoardProps {
   cashTransferFx?: CashTransferFx | null;
   selectedTileIndex: number | null;
   onSelectTile: (tileIndex: number) => void;
+  myPlayerId?: string | null;
+  isSpectator?: boolean;
+  isExpandedView?: boolean;
   showThrownDiceOverlay: boolean;
   isThrowingDice: boolean;
   throwKey: number;
@@ -49,6 +52,9 @@ export function Board({
   cashTransferFx = null,
   selectedTileIndex,
   onSelectTile,
+  myPlayerId = null,
+  isSpectator = false,
+  isExpandedView = false,
   showThrownDiceOverlay,
   isThrowingDice,
   throwKey,
@@ -56,15 +62,23 @@ export function Board({
   activeCardDraw = null,
 }: BoardProps) {
   const [cameraMode, setCameraMode] = useState<'isometric' | 'topdown'>('isometric');
-  const [followActiveToken, setFollowActiveToken] = useState(true);
+  const [followMode, setFollowMode] = useState<'turn' | 'owner' | 'off'>('turn');
+  const [focusOwnerTrigger, setFocusOwnerTrigger] = useState(0);
   const [resetCameraTrigger, setResetCameraTrigger] = useState(0);
 
   const currentPlayer = getCurrentPlayer(gameState);
+  const hasOwnPawn = Boolean(myPlayerId && !isSpectator);
 
   return (
     <div className="relative w-full">
       {/* 3D WebGL Tabletop Stage */}
-      <div className="tabletop-felt relative h-[410px] w-full overflow-hidden rounded-2xl border border-amber-500/30 shadow-2xl sm:h-[510px] lg:h-[575px]">
+      <div
+        className={`tabletop-felt relative w-full overflow-hidden rounded-2xl border border-amber-500/30 shadow-2xl transition-[height] duration-300 ${
+          isExpandedView
+            ? 'h-[410px] sm:h-[510px] lg:h-[calc(100dvh-228px)] lg:min-h-[590px] lg:max-h-[820px]'
+            : 'h-[410px] sm:h-[510px] lg:h-[575px]'
+        }`}
+      >
         <SuperMillionaire3DScene
           gameState={gameState}
           displayPositions={displayPositions}
@@ -84,8 +98,11 @@ export function Board({
           }
           selectedTileIndex={selectedTileIndex}
           onSelectTile={onSelectTile}
+          myPlayerId={myPlayerId}
+          isSpectator={isSpectator}
           cameraMode={cameraMode}
-          followActiveToken={followActiveToken}
+          followMode={followMode}
+          focusOwnerTrigger={focusOwnerTrigger}
           resetCameraTrigger={resetCameraTrigger}
           isThrowingDice={isThrowingDice}
           throwKey={throwKey}
@@ -134,23 +151,46 @@ export function Board({
 
             <button
               type="button"
-              onClick={() => setFollowActiveToken((v) => !v)}
+              onClick={() => {
+                setCameraMode('isometric');
+                setFollowMode((m) => (m === 'turn' ? 'off' : 'turn'));
+              }}
               className={`inline-flex min-h-[30px] items-center gap-1 px-2.5 py-1 text-[11px] font-semibold transition sm:text-xs ${
-                followActiveToken
+                followMode === 'turn'
                   ? 'bg-emerald-950/85 text-emerald-200'
                   : 'text-stone-300 hover:text-amber-100'
               }`}
-              title="เลื่อนกล้องตามตัวเดินขณะทอยเต๋า"
+              title="หมุนและเลื่อนกล้องตามตัวเดินที่กำลังเล่น"
             >
               <Crosshair className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">ติดตาม</span>
+              <span className="hidden sm:inline">ตามเทิร์น</span>
             </button>
+
+            {hasOwnPawn && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCameraMode('isometric');
+                  setFollowMode((m) => (m === 'owner' ? 'turn' : 'owner'));
+                  setFocusOwnerTrigger((n) => n + 1);
+                }}
+                className={`inline-flex min-h-[30px] items-center gap-1 px-2.5 py-1 text-[11px] font-semibold transition sm:text-xs ${
+                  followMode === 'owner'
+                    ? 'bg-amber-500/90 text-stone-950'
+                    : 'text-amber-200/90 hover:bg-stone-800/80 hover:text-amber-100'
+                }`}
+                title="หมุนกระดานหันมาโฟกัสตำแหน่งหมากของคุณตลอดเวลา"
+              >
+                <LocateFixed className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">หมากฉัน</span>
+              </button>
+            )}
 
             <button
               type="button"
               onClick={() => setResetCameraTrigger((n) => n + 1)}
               className="inline-flex min-h-[30px] items-center gap-1 rounded-r-lg px-2.5 py-1 text-[11px] font-semibold text-amber-200 transition hover:bg-stone-800/80 sm:text-xs"
-              title="รีเซ็ตมุมกล้องกลับค่าเริ่มต้น"
+              title="รีเซ็ตมุมกล้องดูภาพรวมทั้งกระดาน"
             >
               <RotateCcw className="h-3.5 w-3.5" />
               <span className="hidden md:inline">รีเซ็ต</span>

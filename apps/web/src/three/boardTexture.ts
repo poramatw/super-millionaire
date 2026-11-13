@@ -199,18 +199,18 @@ function drawTileArtworkGlyph(
   ctx.restore();
 }
 
-export function createBoardCanvasTexture(maxAnisotropy = 8): THREE.CanvasTexture {
+function createBoardTextureSurface(
+  maxAnisotropy: number,
+  topOrientation: 'south' | 'north',
+): {
+  texture: THREE.CanvasTexture;
+  paint: (boardImg: HTMLImageElement | null) => void;
+} {
   const size = 2048;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
-
-  if (!ctx) {
-    const fallback = new THREE.CanvasTexture(canvas);
-    fallback.colorSpace = THREE.SRGBColorSpace;
-    return fallback;
-  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -218,7 +218,8 @@ export function createBoardCanvasTexture(maxAnisotropy = 8): THREE.CanvasTexture
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
 
-  const paintSurface = (boardImg: HTMLImageElement | null) => {
+  const paint = (boardImg: HTMLImageElement | null) => {
+    if (!ctx) return;
     // Classic #165932 heritage green bezel with subtle gold pinstripe
     ctx.fillStyle = '#15542E';
     ctx.fillRect(0, 0, size, size);
@@ -234,7 +235,7 @@ export function createBoardCanvasTexture(maxAnisotropy = 8): THREE.CanvasTexture
     ctx.save();
     ctx.translate(margin, margin);
     drawRichCenterCourt(ctx, innerBoard, cell, boardImg);
-    renderPerimeterTiles(ctx, cell, drawTileArtworkGlyph, boardImg);
+    renderPerimeterTiles(ctx, cell, drawTileArtworkGlyph, boardImg, topOrientation);
 
     // Crisp outer perimeter ink border
     ctx.strokeStyle = '#120E0A';
@@ -245,20 +246,41 @@ export function createBoardCanvasTexture(maxAnisotropy = 8): THREE.CanvasTexture
     texture.needsUpdate = true;
   };
 
-  // Synchronous crisp heritage render on initial frame
-  paintSurface(null);
+  paint(null);
+  return { texture, paint };
+}
 
-  // Progressive enhancement: composite authentic No. 9028 board illustrations when decoded
+export function createBoardCanvasTexture(maxAnisotropy = 8): THREE.CanvasTexture {
+  const { south } = createBoardCanvasTexturePair(maxAnisotropy);
+  return south;
+}
+
+export function createBoardCanvasTexturePair(maxAnisotropy = 8): {
+  south: THREE.CanvasTexture;
+  north: THREE.CanvasTexture;
+  dispose: () => void;
+} {
+  const southSurf = createBoardTextureSurface(maxAnisotropy, 'south');
+  const northSurf = createBoardTextureSurface(maxAnisotropy, 'north');
+
   if (typeof Image !== 'undefined') {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-        paintSurface(img);
+        southSurf.paint(img);
+        northSurf.paint(img);
       }
     };
     img.src = BOARD_IMAGE_URL;
   }
 
-  return texture;
+  return {
+    south: southSurf.texture,
+    north: northSurf.texture,
+    dispose: () => {
+      southSurf.texture.dispose();
+      northSurf.texture.dispose();
+    },
+  };
 }

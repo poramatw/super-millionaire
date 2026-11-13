@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { DiceRollResult, GameState } from '@super-millionaire/shared';
 import {
-  createBoardCanvasTexture,
+  createBoardCanvasTexturePair,
   tileIndexToWorldXZ,
   type TileWorldCoords,
 } from './boardTexture';
@@ -55,8 +55,11 @@ export interface SuperMillionaire3DSceneProps {
   } | null;
   selectedTileIndex: number | null;
   onSelectTile: (tileIndex: number) => void;
+  myPlayerId?: string | null;
+  isSpectator?: boolean;
   cameraMode: 'isometric' | 'topdown';
-  followActiveToken: boolean;
+  followMode: 'turn' | 'owner' | 'off';
+  focusOwnerTrigger?: number;
   resetCameraTrigger: number;
   isThrowingDice: boolean;
   throwKey: number;
@@ -170,10 +173,27 @@ function easeOutQuart(t: number): number {
   return 1 - Math.pow(1 - t, 4);
 }
 
+function normalizeAngle(rad: number): number {
+  let a = (rad + Math.PI) % (Math.PI * 2);
+  if (a < 0) a += Math.PI * 2;
+  return a - Math.PI;
+}
+
 function lerpAngle(current: number, target: number, alpha: number): number {
-  let diff = ((target - current + Math.PI) % (Math.PI * 2)) - Math.PI;
-  if (diff < -Math.PI) diff += Math.PI * 2;
+  const diff = normalizeAngle(target - current);
   return current + diff * alpha;
+}
+
+function getBoardOrbitAngleForTile(tileIndex: number): number {
+  const idx = ((tileIndex % 40) + 40) % 40;
+  if (idx === 0) return Math.PI * 0.14;
+  if (idx >= 1 && idx <= 9) return (5 - idx) * 0.032;
+  if (idx === 10) return -Math.PI * 0.25;
+  if (idx >= 11 && idx <= 19) return -Math.PI * 0.5 + (15 - idx) * 0.032;
+  if (idx === 20) return -Math.PI * 0.75;
+  if (idx >= 21 && idx <= 29) return Math.PI + (25 - idx) * 0.032;
+  if (idx === 30) return Math.PI * 0.75;
+  return Math.PI * 0.5 + (35 - idx) * 0.032;
 }
 
 export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
@@ -213,6 +233,10 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     diceThrow: DiceThrowState;
     cameraLerp: { active: boolean; targetPos: THREE.Vector3; targetLook: THREE.Vector3 };
     userManualOverride: boolean;
+    orbitYaw: number;
+    boardTopMat: THREE.MeshStandardMaterial;
+    boardTexPair: { south: THREE.CanvasTexture; north: THREE.CanvasTexture; dispose: () => void };
+    activeTopOrientation: 'south' | 'north';
     lastBuildKey: number;
     lastCashFxKey: number;
     lastThrowKey: number;
@@ -324,15 +348,15 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     frameMesh.castShadow = true;
     scene.add(frameMesh);
 
-    // 11x11 Board Slab with 2048x2048 CanvasTexture
-    const boardTex = createBoardCanvasTexture(renderer.capabilities.getMaxAnisotropy());
+    // 11x11 Board Slab with Dual South/North Upright 2048x2048 CanvasTextures
+    const boardTexPair = createBoardCanvasTexturePair(renderer.capabilities.getMaxAnisotropy());
     const boardSideMat = new THREE.MeshStandardMaterial({
       color: '#185931',
       roughness: 0.65,
       metalness: 0.06,
     });
     const boardTopMat = new THREE.MeshStandardMaterial({
-      map: boardTex,
+      map: boardTexPair.south,
       roughness: 0.52,
       metalness: 0.04,
     });
@@ -502,6 +526,10 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         targetLook: new THREE.Vector3(0, 0, 0),
       },
       userManualOverride: false,
+      orbitYaw: 0,
+      boardTopMat,
+      boardTexPair,
+      activeTopOrientation: 'south' as 'south' | 'north',
       lastBuildKey: -1,
       lastCashFxKey: -1,
       lastThrowKey: 0,
@@ -730,7 +758,13 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         bundle.spotlightRing.scale.set(pulse, pulse, 1);
       }
 
-      // 6. Smooth Camera Lerp & Active/Next Player Zoom-In Focus
+      // 6. Smooth Camera Lerp & 360-degree Board-Orbit Player Focus
+      const camOffsetX = camera.position.x - controls.target.x;
+      const camOffsetZ = camera.position.z - controls.target.z;
+      if (camOffsetX * camOffsetX + camOffsetZ * camOffsetZ > 0.02) {
+        bundle.orbitYaw = Math.atan2(camOffsetX, camOffsetZ);
+      }
+
       if (bundle.cameraLerp.active) {
         camera.position.lerp(bundle.cameraLerp.targetPos, 0.09);
         controls.target.lerp(bundle.cameraLerp.targetLook, 0.1);
@@ -741,29 +775,69 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
           bundle.cameraLerp.active = false;
         }
       } else if (
-        currentProps.followActiveToken &&
+        currentProps.followMode !== 'off' &&
         currentProps.cameraMode === 'isometric' &&
         !bundle.userManualOverride
       ) {
         if (bundle.diceThrow.active) {
-          // Brief center framing so both bouncing dice are clearly visible (zero per-frame alloc)
-          _camGoal.set(0, 9.6, 8.9);
+          // Keep viewer's current orbit azimuth steady while zooming smoothly over center dice tray
+          const diceDist = 8.4;
+          _camGoal.set(
+            Math.sin(bundle.orbitYaw) * diceDist,
+            9.5,
+            Math.cos(bundle.orbitYaw) * diceDist,
+          );
           _targetGoal.set(0, 0.1, 0);
           camera.position.lerp(_camGoal, 0.085);
           controls.target.lerp(_targetGoal, 0.1);
         } else {
-          const focusId = currentProps.animatingPlayerId ?? currentPlayer?.id;
+          const ownerId =
+            !currentProps.isSpectator && currentProps.myPlayerId
+              ? currentProps.myPlayerId
+              : null;
+          const focusId =
+            currentProps.followMode === 'owner'
+              ? (ownerId ?? currentProps.animatingPlayerId ?? currentPlayer?.id)
+              : (currentProps.animatingPlayerId ?? currentPlayer?.id);
           const focusToken = focusId ? bundle.tokens.get(focusId) : undefined;
           if (focusToken) {
             const tx = focusToken.root.position.x;
             const tz = focusToken.root.position.z;
-            _targetGoal.set(tx * 0.62, 0.22, tz * 0.62);
-            const zoomHeight = currentProps.animatingPlayerId ? 6.8 : 7.5;
-            _camGoal.set(tx * 0.62, zoomHeight, tz * 0.62 + 7.1);
-            controls.target.lerp(_targetGoal, 0.08);
-            camera.position.lerp(_camGoal, 0.065);
+            const desiredYaw = getBoardOrbitAngleForTile(focusToken.tileIndex);
+            const nextYaw = lerpAngle(bundle.orbitYaw, desiredYaw, 0.075);
+            bundle.orbitYaw = nextYaw;
+
+            _targetGoal.set(tx * 0.46, 0.2, tz * 0.46);
+            const orbitDist = currentProps.animatingPlayerId ? 8.1 : 8.9;
+            const zoomHeight = currentProps.animatingPlayerId ? 6.8 : 7.8;
+            _camGoal.set(
+              _targetGoal.x + Math.sin(nextYaw) * orbitDist,
+              zoomHeight,
+              _targetGoal.z + Math.cos(nextYaw) * orbitDist,
+            );
+            controls.target.lerp(_targetGoal, 0.085);
+            camera.position.lerp(_camGoal, 0.075);
           }
         }
+      }
+
+      // Dynamic South/North Top-Edge Artwork Alignment (keeps #20..#30 upright from ANY orbit side!)
+      const viewYawAbs = Math.abs(
+        normalizeAngle(
+          Math.atan2(
+            camera.position.x - controls.target.x,
+            camera.position.z - controls.target.z,
+          ),
+        ),
+      );
+      if (bundle.activeTopOrientation === 'south' && viewYawAbs > 2.02) {
+        bundle.activeTopOrientation = 'north';
+        bundle.boardTopMat.map = bundle.boardTexPair.north;
+        bundle.boardTopMat.needsUpdate = true;
+      } else if (bundle.activeTopOrientation === 'north' && viewYawAbs < 1.82) {
+        bundle.activeTopOrientation = 'south';
+        bundle.boardTopMat.map = bundle.boardTexPair.south;
+        bundle.boardTopMat.needsUpdate = true;
       }
 
       controls.update();
@@ -786,7 +860,7 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
       die2.dispose();
       chestDeck.dispose();
       chanceDeck.dispose();
-      boardTex.dispose();
+      boardTexPair.dispose();
       boardSideMat.dispose();
       boardTopMat.dispose();
       boardGeo.dispose();
@@ -1106,12 +1180,21 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     };
   }, [props.activeCardDraw]);
 
-  // Re-engage active player zoom-in focus when turn advances or follow toggled on
+  // Re-engage smooth board-orbit focus when turn advances, follow mode enables, or owner walks
   useEffect(() => {
     const bundle = sceneBundleRef.current;
     if (!bundle) return;
+    if (props.cameraMode !== 'isometric' || props.followMode === 'off') return;
     bundle.userManualOverride = false;
-  }, [props.gameState.currentTurnIndex, props.gameState.turnNumber, props.followActiveToken]);
+    bundle.cameraLerp.active = false;
+  }, [
+    props.gameState.currentTurnIndex,
+    props.gameState.turnNumber,
+    props.followMode,
+    props.focusOwnerTrigger,
+    props.animatingPlayerId,
+    props.cameraMode,
+  ]);
 
   // Trigger Flying 3D Gold Coins on Cash Transfer FX
   useEffect(() => {
@@ -1165,11 +1248,15 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
   }, [props.cashTransferFx]);
 
   // Smooth Camera Mode Lerp & Reset
+  const prevResetTriggerRef = useRef(0);
   useEffect(() => {
     const bundle = sceneBundleRef.current;
     if (!bundle) return;
 
-    bundle.userManualOverride = false;
+    const isExplicitReset = props.resetCameraTrigger !== prevResetTriggerRef.current;
+    prevResetTriggerRef.current = props.resetCameraTrigger;
+
+    bundle.userManualOverride = isExplicitReset || props.cameraMode === 'topdown';
     bundle.cameraLerp = {
       active: true,
       targetPos:

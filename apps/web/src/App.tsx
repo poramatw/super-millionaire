@@ -24,8 +24,11 @@ import {
   Copy,
   Dices,
   Home,
+  KeyRound,
   LayoutGrid,
   LogOut,
+  PanelRightClose,
+  PanelRightOpen,
   RotateCcw,
   ScrollText,
   ShoppingBag,
@@ -55,21 +58,12 @@ import { soundFX } from './utils/sound';
 type DesktopSidebarTab = 'players' | 'wallet' | 'banker';
 type MobileTab = 'board' | 'players' | 'wallet' | 'banker';
 
-function MobileBottomDock({
-  gameState,
-  myPlayerId,
-  isSpectator,
-  isAnimatingMove,
-  onDispatchAction,
-  onOpenWalletTab,
-}: {
-  gameState: GameState;
-  myPlayerId: string | null;
-  isSpectator: boolean;
-  isAnimatingMove: boolean;
-  onDispatchAction: (action: GameAction) => void;
-  onOpenWalletTab: () => void;
-}) {
+function deriveQuickTurnActions(
+  gameState: GameState,
+  myPlayerId: string | null,
+  isSpectator: boolean,
+  isAnimatingMove: boolean,
+) {
   const currentPlayer = getCurrentPlayer(gameState);
   const isMyTurn = Boolean(myPlayerId && currentPlayer.id === myPlayerId && !isSpectator);
   const effectivePlayerId = myPlayerId ?? currentPlayer.id;
@@ -85,11 +79,292 @@ function MobileBottomDock({
     !isAnimatingMove &&
     gameState.phase === 'ACTION_PHASE' &&
     !canRollDoubles;
+  const canProposeTrade =
+    isMyTurn &&
+    !isAnimatingMove &&
+    (gameState.phase === 'AWAIT_ROLL' || gameState.phase === 'ACTION_PHASE');
 
   const decisionTile =
     gameState.pendingDecisionTileIndex !== null
       ? getTile(gameState.pendingDecisionTileIndex)
       : null;
+
+  return {
+    currentPlayer,
+    isMyTurn,
+    effectivePlayerId,
+    canRollInitial,
+    canRollDoubles,
+    buildCheck,
+    unmortgageCheck,
+    canEndTurn,
+    canProposeTrade,
+    decisionTile,
+  };
+}
+
+function CollapsedDesktopTurnDock({
+  gameState,
+  myPlayerId,
+  isSpectator,
+  isAnimatingMove,
+  onDispatchAction,
+  onOpenTradeModal,
+  onExpandSidebar,
+}: {
+  gameState: GameState;
+  myPlayerId: string | null;
+  isSpectator: boolean;
+  isAnimatingMove: boolean;
+  onDispatchAction: (action: GameAction) => void;
+  onOpenTradeModal: () => void;
+  onExpandSidebar: () => void;
+}) {
+  const {
+    currentPlayer,
+    isMyTurn,
+    effectivePlayerId,
+    canRollInitial,
+    canRollDoubles,
+    buildCheck,
+    unmortgageCheck,
+    canEndTurn,
+    canProposeTrade,
+    decisionTile,
+  } = deriveQuickTurnActions(gameState, myPlayerId, isSpectator, isAnimatingMove);
+
+  return (
+    <div className="luxury-glass-panel hidden items-center justify-between gap-3 rounded-xl px-3.5 py-2 lg:flex">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span
+          className="h-3 w-3 shrink-0 rounded-full border border-white/60"
+          style={{ backgroundColor: currentPlayer.color }}
+        />
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-extrabold text-amber-100">
+            <span className="truncate">
+              {isAnimatingMove
+                ? `${currentPlayer.name} กำลังเดิน...`
+                : isMyTurn
+                  ? 'ตาของคุณ'
+                  : `ตาของ ${currentPlayer.name}`}
+            </span>
+            {currentPlayer.inJail && (
+              <span className="rounded bg-amber-950/90 px-1.5 py-0.5 text-[10px] font-bold text-amber-300 ring-1 ring-amber-400/40">
+                ติดคุก ({Math.min(3, currentPlayer.jailTurns + 1)}/3)
+              </span>
+            )}
+            {gameState.lastDice && (
+              <span className="mono-num rounded bg-black/45 px-1.5 py-0.5 text-[11px] font-bold text-emerald-300 ring-1 ring-emerald-400/30">
+                เต๋า {gameState.lastDice.die1} + {gameState.lastDice.die2} ={' '}
+                {gameState.lastDice.total}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2">
+        {isMyTurn && !isAnimatingMove && (
+          <>
+            {(canRollInitial || canRollDoubles) && (
+              <>
+                {canRollInitial && currentPlayer.inJail && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={currentPlayer.cash < JAIL_BAIL_AMOUNT}
+                      onClick={() =>
+                        onDispatchAction({ type: 'PAY_JAIL_BAIL', playerId: effectivePlayerId })
+                      }
+                      className="tactile-btn inline-flex items-center gap-1 rounded-xl border border-amber-500/70 bg-amber-400 px-3 py-1.5 text-xs font-extrabold text-stone-950 disabled:opacity-45"
+                    >
+                      <span>ประกัน ฿{JAIL_BAIL_AMOUNT}</span>
+                    </button>
+                    {currentPlayer.jailFreeCards > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onDispatchAction({ type: 'USE_JAIL_CARD', playerId: effectivePlayerId })
+                        }
+                        className="tactile-btn inline-flex items-center gap-1 rounded-xl border border-sky-400/50 bg-sky-700 px-3 py-1.5 text-xs font-extrabold text-white"
+                      >
+                        <KeyRound className="h-3.5 w-3.5" />
+                        <span>บัตรพ้นคุก</span>
+                      </button>
+                    )}
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    onDispatchAction({ type: 'ROLL_DICE', playerId: effectivePlayerId })
+                  }
+                  className="tactile-btn inline-flex items-center gap-1.5 rounded-xl border border-emerald-300/60 bg-gradient-to-b from-[#228d4f] to-[#155e34] px-4 py-1.5 text-xs font-extrabold text-amber-50 shadow"
+                >
+                  <Dices className="h-4 w-4 text-amber-200" />
+                  <span>
+                    {currentPlayer.inJail
+                      ? 'ทอยลุ้นเบิ้ลออกคุก'
+                      : canRollDoubles
+                        ? 'ทอยเบิ้ลอีกครั้ง!'
+                        : 'ทอยลูกเต๋า 2 ลูก'}
+                  </span>
+                </button>
+              </>
+            )}
+
+            {gameState.phase === 'AWAIT_DECISION' && decisionTile && (
+              <>
+                <button
+                  type="button"
+                  disabled={currentPlayer.cash < (decisionTile.price ?? 0)}
+                  onClick={() =>
+                    onDispatchAction({ type: 'BUY_CURRENT_TILE', playerId: effectivePlayerId })
+                  }
+                  className="tactile-btn inline-flex items-center gap-1.5 rounded-xl border border-emerald-400/60 bg-gradient-to-b from-[#21874c] to-[#14532e] px-3.5 py-1.5 text-xs font-extrabold text-amber-50 disabled:opacity-45"
+                >
+                  <ShoppingBag className="h-3.5 w-3.5" />
+                  <span>
+                    ซื้อ #{decisionTile.deedNumber} (฿{formatBahtNumber(decisionTile.price ?? 0)})
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onDispatchAction({ type: 'DECLINE_CURRENT_TILE', playerId: effectivePlayerId })
+                  }
+                  className="tactile-btn inline-flex items-center gap-1 rounded-xl border border-stone-600 bg-stone-800 px-3 py-1.5 text-xs font-bold text-stone-200 hover:bg-stone-700"
+                >
+                  <SkipForward className="h-3.5 w-3.5" />
+                  <span>ไม่ซื้อ</span>
+                </button>
+              </>
+            )}
+
+            {gameState.phase === 'AWAIT_DEBT_RESOLUTION' && (
+              <button
+                type="button"
+                onClick={onExpandSidebar}
+                className="tactile-btn inline-flex items-center gap-1.5 rounded-xl border border-rose-400/60 bg-rose-800 px-3.5 py-1.5 text-xs font-extrabold text-white"
+              >
+                <span>จัดการหนี้ค้างชำระ (เปิดแผงขวา)</span>
+              </button>
+            )}
+
+            {gameState.phase === 'ACTION_PHASE' && (
+              <>
+                {buildCheck.allowed && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onDispatchAction({
+                        type: 'BUILD_ON_CURRENT_TILE',
+                        playerId: effectivePlayerId,
+                      })
+                    }
+                    className="tactile-btn inline-flex items-center gap-1 rounded-xl border border-amber-400/70 bg-gradient-to-b from-[#b45309] to-[#78350f] px-3 py-1.5 text-xs font-extrabold text-amber-50"
+                  >
+                    {buildCheck.isHotelUpgrade ? (
+                      <Building2 className="h-3.5 w-3.5" />
+                    ) : (
+                      <Home className="h-3.5 w-3.5" />
+                    )}
+                    <span>
+                      {buildCheck.isHotelUpgrade ? 'สร้างโรงแรม' : 'สร้างบ้าน'} (฿
+                      {formatBahtNumber(buildCheck.cost ?? 0)})
+                    </span>
+                  </button>
+                )}
+
+                {unmortgageCheck.allowed && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onDispatchAction({
+                        type: 'UNMORTGAGE_CURRENT_TILE',
+                        playerId: effectivePlayerId,
+                      })
+                    }
+                    className="tactile-btn inline-flex items-center gap-1 rounded-xl border border-emerald-400/50 bg-[#155e34] px-3 py-1.5 text-xs font-extrabold text-white"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    <span>ไถ่ถอน (฿{formatBahtNumber(unmortgageCheck.cost ?? 0)})</span>
+                  </button>
+                )}
+              </>
+            )}
+
+            {canProposeTrade && (
+              <button
+                type="button"
+                onClick={onOpenTradeModal}
+                className="tactile-btn inline-flex items-center gap-1 rounded-xl border border-sky-400/50 bg-[#163f72] px-3 py-1.5 text-xs font-bold text-white"
+              >
+                <ArrowLeftRight className="h-3.5 w-3.5" />
+                <span>แลกเปลี่ยน</span>
+              </button>
+            )}
+
+            {canEndTurn && (
+              <button
+                type="button"
+                onClick={() =>
+                  onDispatchAction({ type: 'END_TURN', playerId: effectivePlayerId })
+                }
+                className="tactile-btn inline-flex items-center gap-1.5 rounded-xl border border-rose-400/50 bg-gradient-to-b from-[#d92b35] to-[#9e1a22] px-3.5 py-1.5 text-xs font-extrabold text-white shadow"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>
+                  {currentPlayer.inJail && gameState.hasRolledThisTurn
+                    ? 'จบตา (หยุดในคุก)'
+                    : 'จบเทิร์น'}
+                </span>
+              </button>
+            )}
+          </>
+        )}
+
+        <button
+          type="button"
+          onClick={onExpandSidebar}
+          className="tactile-btn inline-flex items-center gap-1.5 rounded-xl border border-amber-400/40 bg-black/50 px-3 py-1.5 text-xs font-bold text-amber-200 hover:bg-white/10"
+          title="เปิดแผงข้อมูลและผู้เล่นทางด้านขวา"
+        >
+          <PanelRightOpen className="h-4 w-4 text-amber-300" />
+          <span>เปิดแผงขวา</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MobileBottomDock({
+  gameState,
+  myPlayerId,
+  isSpectator,
+  isAnimatingMove,
+  onDispatchAction,
+  onOpenWalletTab,
+}: {
+  gameState: GameState;
+  myPlayerId: string | null;
+  isSpectator: boolean;
+  isAnimatingMove: boolean;
+  onDispatchAction: (action: GameAction) => void;
+  onOpenWalletTab: () => void;
+}) {
+  const {
+    currentPlayer,
+    isMyTurn,
+    effectivePlayerId,
+    canRollInitial,
+    canRollDoubles,
+    buildCheck,
+    unmortgageCheck,
+    canEndTurn,
+    decisionTile,
+  } = deriveQuickTurnActions(gameState, myPlayerId, isSpectator, isAnimatingMove);
 
   return (
     <div className="safe-pb fixed inset-x-0 bottom-0 z-40 border-t-2 border-amber-500/40 bg-stone-950/95 px-3 py-2 backdrop-blur-md lg:hidden">
@@ -286,6 +561,7 @@ export default function App() {
   const [sidebarTab, setSidebarTab] = useState<DesktopSidebarTab>('players');
   const [mobileTab, setMobileTab] = useState<MobileTab>('board');
   const [isPlayerHudCollapsed, setIsPlayerHudCollapsed] = useState(false);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [inspectedPlayerId, setInspectedPlayerId] = useState<string>('');
   const [displayPositions, setDisplayPositions] = useState<Record<string, number>>({});
   const [animatingPlayerId, setAnimatingPlayerId] = useState<string | null>(null);
@@ -902,6 +1178,29 @@ export default function App() {
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <button
                   type="button"
+                  onClick={() => setIsRightPanelCollapsed((v) => !v)}
+                  className={`touch-target hidden lg:inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition ${
+                    isRightPanelCollapsed
+                      ? 'border-amber-400/60 bg-amber-950/75 text-amber-200 hover:bg-amber-900/70'
+                      : 'border-stone-700 bg-stone-900 text-amber-100 hover:bg-stone-800'
+                  }`}
+                  title={isRightPanelCollapsed ? 'เปิดแผงควบคุมด้านขวา' : 'หุบแผงด้านขวาเพื่อขยายกระดานเต็มพื้นที่'}
+                >
+                  {isRightPanelCollapsed ? (
+                    <PanelRightOpen className="h-3.5 w-3.5 text-amber-300" />
+                  ) : (
+                    <PanelRightClose className="h-3.5 w-3.5 text-amber-300" />
+                  )}
+                  <span>{isRightPanelCollapsed ? 'เปิดแผงขวา' : 'หุบแผงขวา'}</span>
+                  {isRightPanelCollapsed && incomingTradeCount > 0 && (
+                    <span className="mono-num rounded-full bg-amber-400 px-1.5 text-[10px] font-black text-stone-950">
+                      {incomingTradeCount}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleCopyInvite}
                   className="touch-target inline-flex items-center gap-1 rounded-lg border border-stone-700 bg-stone-900 px-2.5 py-1.5 text-xs font-semibold text-amber-100 hover:bg-stone-800"
                   title="คัดลอกลิงก์เชิญ"
@@ -976,13 +1275,29 @@ export default function App() {
           </header>
 
           {/* Main Responsive Workspace */}
-          <main className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-4 overflow-x-clip px-2.5 pt-2.5 pb-24 sm:px-5 lg:flex-row lg:items-start lg:py-3">
+          <main
+            className={`mx-auto flex w-full flex-1 flex-col gap-4 overflow-x-clip px-2.5 pt-2.5 pb-24 sm:px-5 lg:flex-row lg:items-start lg:py-3 ${
+              isRightPanelCollapsed ? 'max-w-[1680px]' : 'max-w-[1440px]'
+            }`}
+          >
             {/* Desktop & Mobile Board Pane */}
             <section
-              className={`min-w-0 max-w-full flex-1 pb-4 lg:pb-2 ${
+              className={`min-w-0 max-w-full flex-1 space-y-2.5 pb-4 lg:pb-2 ${
                 mobileTab === 'board' ? 'block' : 'hidden lg:block'
               }`}
             >
+              {isRightPanelCollapsed && (
+                <CollapsedDesktopTurnDock
+                  gameState={gameState}
+                  myPlayerId={myPlayerId}
+                  isSpectator={isSpectator}
+                  isAnimatingMove={animatingPlayerId !== null || isThrowingDice}
+                  onDispatchAction={handleDispatchAction}
+                  onOpenTradeModal={() => setTradeModalOpen(true)}
+                  onExpandSidebar={() => setIsRightPanelCollapsed(false)}
+                />
+              )}
+
               <Board
                 gameState={gameState}
                 displayPositions={displayPositions}
@@ -992,6 +1307,9 @@ export default function App() {
                 cashTransferFx={cashTransferFx}
                 selectedTileIndex={selectedTileIndex}
                 onSelectTile={(idx) => setSelectedTileIndex(idx)}
+                myPlayerId={myPlayerId}
+                isSpectator={isSpectator}
+                isExpandedView={isRightPanelCollapsed}
                 showThrownDiceOverlay={showThrownDiceOverlay}
                 isThrowingDice={isThrowingDice}
                 throwKey={throwKey}
@@ -1133,8 +1451,28 @@ export default function App() {
               </div>
             </section>
 
-            {/* Right Sidebar (Desktop always visible; Mobile renders active subtab) */}
-            <aside className="flex w-full min-w-0 max-w-full flex-col gap-3 lg:w-[410px] lg:shrink-0 xl:w-[445px]">
+            {/* Right Sidebar (Desktop collapsible for full-board play; Mobile renders active subtab) */}
+            <aside
+              className={`flex w-full min-w-0 max-w-full flex-col gap-3 ${
+                isRightPanelCollapsed
+                  ? 'lg:hidden'
+                  : 'lg:w-[410px] lg:shrink-0 xl:w-[445px]'
+              }`}
+            >
+              <div className="hidden items-center justify-between px-0.5 lg:flex">
+                <span className="text-[11px] font-bold tracking-wider text-amber-200/70 uppercase">
+                  แผงควบคุม & ข้อมูลผู้เล่น
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsRightPanelCollapsed(true)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-amber-400/25 bg-black/40 px-2.5 py-1 text-[11px] font-semibold text-amber-200 transition hover:bg-white/10"
+                  title="หุบแผงด้านขวาเพื่อให้แสดงกระดานเต็มพื้นที่"
+                >
+                  <span>หุบแผง</span>
+                  <PanelRightClose className="h-3.5 w-3.5 text-amber-300" />
+                </button>
+              </div>
               {/* Desktop TurnControls always pinned at top of sidebar */}
               <div className={mobileTab === 'board' ? 'block' : 'hidden lg:block'}>
                 <TurnControls
