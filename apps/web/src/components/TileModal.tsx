@@ -1,0 +1,336 @@
+import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  canBuildOnCurrentTile,
+  canMortgageTile,
+  canSellHouseOnTile,
+  canUnmortgageCurrentTile,
+  calculateUnmortgageCost,
+  getCurrentPlayer,
+  getTile,
+  type GameAction,
+  type GameState,
+} from '@super-millionaire/shared';
+import { Building2, Coins, Home, Landmark, RotateCcw, X } from 'lucide-react';
+import { HotelPiece, HousePiece, OriginalTileCrop } from '../artwork';
+import { COLOR_GROUP_META, formatBahtNumber } from '../utils/boardLayout';
+
+export interface TileModalProps {
+  tileIndex: number | null;
+  gameState: GameState;
+  myPlayerId: string | null;
+  onClose: () => void;
+  onDispatchAction: (action: GameAction) => void;
+}
+
+export function TileModal({
+  tileIndex,
+  gameState,
+  myPlayerId,
+  onClose,
+  onDispatchAction,
+}: TileModalProps) {
+  useEffect(() => {
+    if (tileIndex === null) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [tileIndex, onClose]);
+
+  if (tileIndex === null || typeof document === 'undefined') return null;
+
+  const tile = getTile(tileIndex);
+  const deed = gameState.deeds[tile.index];
+  const owner = deed?.ownerId
+    ? gameState.players.find((p) => p.id === deed.ownerId)
+    : undefined;
+  const colorMeta = tile.colorGroup ? COLOR_GROUP_META[tile.colorGroup] : null;
+  const currentPlayer = getCurrentPlayer(gameState);
+  const isMyTurn = Boolean(myPlayerId && currentPlayer.id === myPlayerId);
+  const isStandingHere = Boolean(myPlayerId && currentPlayer.id === myPlayerId && currentPlayer.position === tile.index);
+
+  const buildCheck = isMyTurn && isStandingHere
+    ? canBuildOnCurrentTile(gameState, myPlayerId!)
+    : { allowed: false };
+  const unmortgageCheck = isMyTurn && isStandingHere
+    ? canUnmortgageCurrentTile(gameState, myPlayerId!)
+    : { allowed: false };
+  const sellCheck = isMyTurn
+    ? canSellHouseOnTile(gameState, myPlayerId!, tile.index)
+    : { allowed: false };
+  const mortgageCheck = isMyTurn
+    ? canMortgageTile(gameState, myPlayerId!, tile.index)
+    : { allowed: false };
+
+  const unmortgagePrice = tile.price !== undefined ? calculateUnmortgageCost(tile) : 0;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 backdrop-blur-xs sm:p-5"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={tile.name}
+    >
+      <div
+        className="cardstock-texture deed-card-bevel relative max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl border-2 border-[#2a2118] text-[#1c1814]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Top Color Band */}
+        <div
+          className="flex items-center justify-between px-4 py-3"
+          style={{
+            backgroundColor: colorMeta?.bandBg ?? '#1C6B3A',
+            color: colorMeta?.bandText ?? '#FFF8EB',
+          }}
+        >
+          <div className="flex items-center gap-2">
+            {tile.deedNumber !== undefined && (
+              <span className="mono-num rounded-md bg-black/25 px-2 py-0.5 text-xs font-extrabold">
+                โฉนด #{tile.deedNumber}
+              </span>
+            )}
+            <h3 className="font-[var(--font-display)] text-lg font-extrabold">
+              {tile.name}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="ปิดหน้าต่างโฉนด"
+            className="touch-target flex h-9 w-9 items-center justify-center rounded-full bg-black/25 text-current hover:bg-black/40"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Authentic Board Crop Header */}
+        <div className="relative flex h-48 w-full items-center justify-center overflow-hidden border-b-2 border-[#2a2118]/25 bg-[#e8d9b0] p-2.5">
+          <div className="h-full w-40 overflow-hidden rounded-xl border-2 border-[#2a2118]/30 bg-[#f6ecd2] shadow-inner">
+            <OriginalTileCrop tileIndex={tile.index} className="h-full w-full" />
+          </div>
+          {deed?.isMortgaged && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/35">
+              <span className="-rotate-12 rounded-lg border-2 border-red-900 bg-red-600 px-3 py-1 text-base font-extrabold text-white shadow-lg">
+                ติดจำนองอยู่
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4 p-4">
+          {/* Owner & Building Summary */}
+          {deed && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#2a2118]/15 bg-white/75 px-3 py-2.5 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-stone-600">เจ้าของ:</span>
+                {owner ? (
+                  <span className="inline-flex items-center gap-1.5 font-bold">
+                    <span
+                      className="h-3 w-3 rounded-full border border-black/20"
+                      style={{ backgroundColor: owner.color }}
+                    />
+                    {owner.name}
+                  </span>
+                ) : (
+                  <span className="font-semibold text-emerald-700">ว่าง (รอซื้อ)</span>
+                )}
+              </div>
+
+              {(deed.hasHotel || deed.houses > 0) && (
+                <div className="flex items-center gap-1">
+                  {deed.hasHotel ? (
+                    <>
+                      <HotelPiece size={20} />
+                      <span className="text-xs font-bold text-orange-700">โรงแรม 1 แห่ง</span>
+                    </>
+                  ) : (
+                    <>
+                      {Array.from({ length: deed.houses }).map((_, i) => (
+                        <HousePiece key={i} size={18} />
+                      ))}
+                      <span className="mono-num text-xs font-bold text-pink-700">
+                        {deed.houses} หลัง
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Price & Mortgage Info */}
+          {tile.price !== undefined && (
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="rounded-xl border border-[#2a2118]/15 bg-white/70 p-2">
+                <div className="text-stone-500">ราคาซื้อ</div>
+                <div className="mono-num mt-0.5 text-sm font-extrabold text-stone-900">
+                  ฿{formatBahtNumber(tile.price)}
+                </div>
+              </div>
+              <div className="rounded-xl border border-[#2a2118]/15 bg-white/70 p-2">
+                <div className="text-stone-500">มูลค่าจำนอง</div>
+                <div className="mono-num mt-0.5 text-sm font-extrabold text-amber-800">
+                  ฿{formatBahtNumber(tile.mortgageValue ?? Math.floor(tile.price / 2))}
+                </div>
+              </div>
+              <div className="rounded-xl border border-[#2a2118]/15 bg-white/70 p-2">
+                <div className="text-stone-500">ไถ่ถอน (+10%)</div>
+                <div className="mono-num mt-0.5 text-sm font-extrabold text-emerald-800">
+                  ฿{formatBahtNumber(unmortgagePrice)}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Property Rent Table */}
+          {tile.type === 'property' && tile.rents && (
+            <div className="rounded-xl border border-[#2a2118]/20 bg-white/80 p-3 text-xs">
+              <div className="mb-2 flex items-center justify-between font-bold text-stone-800">
+                <span>ตารางค่าเช่า</span>
+                {tile.houseCost && (
+                  <span className="mono-num text-stone-600">
+                    ค่าสร้างบ้าน/โรงแรม: ฿{formatBahtNumber(tile.houseCost)}
+                  </span>
+                )}
+              </div>
+              <div className="space-y-1">
+                {[
+                  { label: 'ที่ดินเปล่า', value: tile.rents[0] },
+                  { label: 'เมื่อครบชุดสี (×2)', value: (tile.rents[0] ?? 0) * 2 },
+                  { label: 'บ้าน 1 หลัง', value: tile.rents[1] },
+                  { label: 'บ้าน 2 หลัง', value: tile.rents[2] },
+                  { label: 'บ้าน 3 หลัง', value: tile.rents[3] },
+                  { label: 'บ้าน 4 หลัง', value: tile.rents[4] },
+                  { label: 'โรงแรม 1 แห่ง', value: tile.rents[5] },
+                ].map((row) => (
+                  <div
+                    key={row.label}
+                    className="flex items-center justify-between border-b border-stone-200/70 py-1 last:border-none"
+                  >
+                    <span className="text-stone-700">{row.label}</span>
+                    <span className="mono-num font-bold text-stone-900">
+                      ฿{formatBahtNumber(row.value ?? 0)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Hotel Rent Table */}
+          {tile.type === 'hotel' && tile.rents && (
+            <div className="rounded-xl border border-[#2a2118]/20 bg-white/80 p-3 text-xs">
+              <div className="mb-2 font-bold text-stone-800">ตารางค่าเช่ากลุ่มโรงแรม</div>
+              <div className="space-y-1">
+                {tile.rents.map((rent, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between border-b border-stone-200/70 py-1 last:border-none"
+                  >
+                    <span className="text-stone-700">ถือครอง {idx + 1} แห่ง</span>
+                    <span className="mono-num font-bold text-stone-900">
+                      ฿{formatBahtNumber(rent)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Description for Utilities / Special Tiles */}
+          {tile.description && (
+            <div className="rounded-xl border border-[#2a2118]/15 bg-[#ede1c4]/70 p-3 text-xs leading-relaxed text-stone-800">
+              {tile.description}
+            </div>
+          )}
+
+          {/* Contextual Management Buttons when legal */}
+          {isMyTurn && deed?.ownerId === myPlayerId && (
+            <div className="space-y-2 border-t border-[#2a2118]/15 pt-3">
+              {!isStandingHere && gameState.phase === 'ACTION_PHASE' && (
+                <p className="text-center text-[11px] font-medium text-amber-800">
+                  ตามกติกา: ในตาปกติต้องยืนอยู่บนช่องนี้จึงจะสร้างบ้าน ขายบ้าน จำนอง หรือไถ่ถอนได้
+                </p>
+              )}
+
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {buildCheck.allowed && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDispatchAction({ type: 'BUILD_ON_CURRENT_TILE', playerId: myPlayerId! });
+                      onClose();
+                    }}
+                    className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-[#143d25] bg-[#1b7a43] px-3 py-2.5 text-xs font-bold text-white shadow"
+                  >
+                    {buildCheck.isHotelUpgrade ? (
+                      <Building2 className="h-4 w-4" />
+                    ) : (
+                      <Home className="h-4 w-4" />
+                    )}
+                    <span>
+                      {buildCheck.isHotelUpgrade ? 'สร้างโรงแรม' : 'สร้างบ้าน'} (฿
+                      {formatBahtNumber(buildCheck.cost ?? 0)})
+                    </span>
+                  </button>
+                )}
+
+                {unmortgageCheck.allowed && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDispatchAction({ type: 'UNMORTGAGE_CURRENT_TILE', playerId: myPlayerId! });
+                      onClose();
+                    }}
+                    className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-emerald-800 bg-emerald-600 px-3 py-2.5 text-xs font-bold text-white shadow"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    <span>ไถ่ถอน (฿{formatBahtNumber(unmortgageCheck.cost ?? 0)})</span>
+                  </button>
+                )}
+
+                {sellCheck.allowed && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDispatchAction({
+                        type: 'SELL_HOUSE_ON_TILE',
+                        playerId: myPlayerId!,
+                        tileIndex: tile.index,
+                      });
+                    }}
+                    className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-amber-700 bg-amber-500 px-3 py-2.5 text-xs font-bold text-stone-950 shadow"
+                  >
+                    <Coins className="h-4 w-4" />
+                    <span>ขายบ้านคืน (+฿{formatBahtNumber(sellCheck.refund ?? 0)})</span>
+                  </button>
+                )}
+
+                {mortgageCheck.allowed && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDispatchAction({
+                        type: 'MORTGAGE_TILE',
+                        playerId: myPlayerId!,
+                        tileIndex: tile.index,
+                      });
+                    }}
+                    className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-rose-900 bg-rose-700 px-3 py-2.5 text-xs font-bold text-white shadow"
+                  >
+                    <Landmark className="h-4 w-4" />
+                    <span>จำนอง (+฿{formatBahtNumber(mortgageCheck.proceeds ?? 0)})</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}

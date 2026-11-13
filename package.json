@@ -11,6 +11,7 @@
     "dev:server": "npm run dev --workspace=@super-millionaire/server",
     "dev:web": "npm run dev --workspace=@super-millionaire/web",
     "build": "npm run build --workspace=@super-millionaire/shared && npm run build --workspace=@super-millionaire/server && npm run build --workspace=@super-millionaire/web",
+    "build:web": "npm run build --workspace=@super-millionaire/shared && npm run build --workspace=@super-millionaire/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
   }
