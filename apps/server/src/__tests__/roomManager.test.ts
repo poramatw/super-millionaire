@@ -49,6 +49,80 @@ function waitForEvent<T>(
   });
 }
 
+function trackLatestGameState(socket: ClientSocket): {
+  getLatest: () => GameState | null;
+  waitUntil: (predicate: (g: GameState) => boolean, timeoutMs?: number) => Promise<GameState>;
+  dispose: () => void;
+} {
+  let latest: GameState | null = null;
+  const waiters: Array<{
+    predicate: (g: GameState) => boolean;
+    resolve: (g: GameState) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = [];
+
+  const handler = (g: GameState) => {
+    latest = g;
+    for (let i = waiters.length - 1; i >= 0; i--) {
+      const w = waiters[i]!;
+      if (w.predicate(g)) {
+        clearTimeout(w.timer);
+        waiters.splice(i, 1);
+        w.resolve(g);
+      }
+    }
+  };
+
+  socket.on('game:state', handler);
+
+  return {
+    getLatest: () => latest,
+    waitUntil: (predicate, timeoutMs = 4000) => {
+      if (latest && predicate(latest)) {
+        return Promise.resolve(latest);
+      }
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          const idx = waiters.findIndex((w) => w.timer === timer);
+          if (idx >= 0) waiters.splice(idx, 1);
+          reject(new Error('Timed out waiting for tracked GameState predicate'));
+        }, timeoutMs);
+        waiters.push({ predicate, resolve, timer });
+      });
+    },
+    dispose: () => {
+      for (const w of waiters) clearTimeout(w.timer);
+      waiters.length = 0;
+      socket.off('game:state', handler);
+    },
+  };
+}
+
+async function driveTurnOrderOverSockets(
+  roomId: string,
+  tracker: ReturnType<typeof trackLatestGameState>,
+  humanSockets: Record<string, ClientSocket>,
+): Promise<GameState> {
+  let state = await tracker.waitUntil((g) => g.phase === 'TURN_ORDER_ROLL' || g.phase === 'AWAIT_ROLL');
+  for (let guard = 0; state.phase === 'TURN_ORDER_ROLL' && guard < 40; guard++) {
+    const prevLedgerLen = state.banker.ledger.length;
+    const roller = state.players[state.currentTurnIndex]!;
+    const sock = humanSockets[roller.id];
+    const nextPromise = tracker.waitUntil((g) => g.banker.ledger.length > prevLedgerLen);
+    if (sock) {
+      await new Promise((resolve) =>
+        sock.emit(
+          'game:action',
+          { roomId, action: { type: 'ROLL_DICE', playerId: roller.id } },
+          resolve,
+        ),
+      );
+    }
+    state = await nextPromise;
+  }
+  return state;
+}
+
 describe('RoomManager & Socket.IO multiplayer server', () => {
   const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -180,38 +254,48 @@ describe('RoomManager & Socket.IO multiplayer server', () => {
     expect(readyRoom.seats).toHaveLength(6);
     expect(readyRoom.seats[1]?.ready).toBe(true);
 
-    // Host starts game
-    const gameStartPromise = waitForEvent<GameState>(
-      guest,
-      'game:state',
-      (g) => g.phase === 'AWAIT_ROLL',
-    );
+    // Host starts game -> enters TURN_ORDER_ROLL first, then resolves highest roller into AWAIT_ROLL
+    const tracker = trackLatestGameState(guest);
+    cleanups.push(() => tracker.dispose());
+
     const startAck = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
       host.emit('room:startGame', { roomId }, resolve);
     });
     expect(startAck.ok).toBe(true);
-    const initialGame = await gameStartPromise;
-    expect(initialGame.players).toHaveLength(6);
-    expect(initialGame.players[0]?.kind).toBe('human');
-    expect(initialGame.players[1]?.kind).toBe('human');
-    expect(initialGame.players[2]?.kind).toBe('bot');
 
-    // Guest cannot forge an action as player-1
-    const spoofAck = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+    const startedInTurnOrder = await tracker.waitUntil((g) => g.phase === 'TURN_ORDER_ROLL');
+    expect(startedInTurnOrder.players).toHaveLength(6);
+    expect(startedInTurnOrder.players[0]?.kind).toBe('human');
+    expect(startedInTurnOrder.players[1]?.kind).toBe('human');
+    expect(startedInTurnOrder.players[2]?.kind).toBe('bot');
+
+    // Spoofing another player's roll fails even during TURN_ORDER_ROLL
+    const spoofOrderAck = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
       guest.emit(
         'game:action',
         { roomId, action: { type: 'ROLL_DICE', playerId: 'player-1' } },
         resolve,
       );
     });
-    expect(spoofAck.ok).toBe(false);
+    expect(spoofOrderAck.ok).toBe(false);
+
+    // Complete turn-order rolls for humans and bots (including any tie-breakers)
+    const afterTurnOrder = await driveTurnOrderOverSockets(roomId, tracker, {
+      'player-1': host,
+      'player-2': guest,
+    });
+    expect(afterTurnOrder.phase).toBe('AWAIT_ROLL');
+    expect(afterTurnOrder.turnOrder?.winnerId).toBe(
+      afterTurnOrder.players[afterTurnOrder.currentTurnIndex]?.id,
+    );
+
+    // Wait until it is player-1's turn in AWAIT_ROLL (bots auto-play if a bot won Turn 1)
+    let current = await tracker.waitUntil(
+      (g) => g.phase === 'AWAIT_ROLL' && g.players[g.currentTurnIndex]?.id === 'player-1',
+    );
 
     // Host rolls dice with server CSPRNG; no turn timer skips their turn
-    const afterRollPromise = waitForEvent<GameState>(
-      host,
-      'game:state',
-      (g) => g.hasRolledThisTurn === true,
-    );
+    const rollPromise = tracker.waitUntil((g) => g.hasRolledThisTurn === true);
     const rollAck = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
       host.emit(
         'game:action',
@@ -220,7 +304,7 @@ describe('RoomManager & Socket.IO multiplayer server', () => {
       );
     });
     expect(rollAck.ok).toBe(true);
-    let current = await afterRollPromise;
+    current = await rollPromise;
     expect(current.lastDice?.die1).toBeGreaterThanOrEqual(1);
     expect(current.lastDice?.die1).toBeLessThanOrEqual(6);
     expect(current.lastDice?.die2).toBeGreaterThanOrEqual(1);
@@ -238,26 +322,26 @@ describe('RoomManager & Socket.IO multiplayer server', () => {
       safety < 10
     ) {
       safety++;
+      const prevLen = current.banker.ledger.length;
+      const nextPromise = tracker.waitUntil(
+        (g) =>
+          g.banker.ledger.length > prevLen ||
+          g.players[g.currentTurnIndex]?.id !== 'player-1' ||
+          g.phase === 'GAME_OVER',
+      );
       if (current.phase === 'AWAIT_ROLL') {
-        const nextPromise = waitForEvent<GameState>(host, 'game:state');
         await new Promise((resolve) =>
           host.emit('game:action', { roomId, action: { type: 'ROLL_DICE', playerId: 'player-1' } }, resolve),
         );
-        current = await nextPromise;
       } else if (current.phase === 'AWAIT_DECISION') {
-        const nextPromise = waitForEvent<GameState>(host, 'game:state');
         await new Promise((resolve) =>
           host.emit('game:action', { roomId, action: { type: 'DECLINE_CURRENT_TILE', playerId: 'player-1' } }, resolve),
         );
-        current = await nextPromise;
       } else if (current.phase === 'AWAIT_DEBT_RESOLUTION') {
-        const nextPromise = waitForEvent<GameState>(host, 'game:state');
         await new Promise((resolve) =>
           host.emit('game:action', { roomId, action: { type: 'DECLARE_BANKRUPTCY', playerId: 'player-1' } }, resolve),
         );
-        current = await nextPromise;
       } else if (current.phase === 'ACTION_PHASE') {
-        const nextPromise = waitForEvent<GameState>(host, 'game:state');
         if (current.lastDice?.isDoubles && !current.players[0]?.inJail && current.doublesCount < 3) {
           await new Promise((resolve) =>
             host.emit('game:action', { roomId, action: { type: 'ROLL_DICE', playerId: 'player-1' } }, resolve),
@@ -267,11 +351,11 @@ describe('RoomManager & Socket.IO multiplayer server', () => {
             host.emit('game:action', { roomId, action: { type: 'END_TURN', playerId: 'player-1' } }, resolve),
           );
         }
-        current = await nextPromise;
       }
+      current = await nextPromise;
     }
 
-    // Turn should now belong to player-2 (guest)
+    // Turn should now pass clockwise to player-2 (guest)
     expect(current.players[current.currentTurnIndex]?.id).toBe('player-2');
   });
 
@@ -365,7 +449,13 @@ describe('RoomManager & Socket.IO multiplayer server', () => {
       );
     });
     const roomId = createAck.roomId!;
+    const tradeTracker = trackLatestGameState(host);
+    cleanups.push(() => tradeTracker.dispose());
     await new Promise((resolve) => host.emit('room:startGame', { roomId }, resolve));
+    await driveTurnOrderOverSockets(roomId, tradeTracker, { 'player-1': host });
+    await tradeTracker.waitUntil(
+      (g) => g.phase === 'AWAIT_ROLL' && g.players[g.currentTurnIndex]?.id === 'player-1',
+    );
 
     // Wait for bot auto-response after human sends a trade offer
     const tradeResolvedPromise = waitForEvent<GameState>(
@@ -468,28 +558,45 @@ describe('RoomManager & Socket.IO multiplayer server', () => {
     manager.joinRoom({ socketId: 's2', sessionToken: 't2', roomId, playerName: 'ผู้เล่น 2' });
     manager.startGame({ socketId: 's1', sessionToken: 't1', roomId });
 
-    // Roll player 1 into ACTION_PHASE or AWAIT_DECISION -> decline if needed -> ACTION_PHASE
+    // Complete turn-order rolls cleanly via RoomManager before entering Turn 1
     let state = manager.getRoomState(roomId)!.gameState!;
+    for (let guard = 0; state.phase === 'TURN_ORDER_ROLL' && guard < 20; guard++) {
+      const rollerId = state.players[state.currentTurnIndex]!.id;
+      const rollerSock = rollerId === 'player-1' ? 's1' : 's2';
+      const orderRoll = manager.handleGameAction({
+        socketId: rollerSock,
+        roomId,
+        action: { type: 'ROLL_DICE', playerId: rollerId },
+      });
+      expect(orderRoll.ok).toBe(true);
+      state = orderRoll.gameState!;
+    }
+    expect(state.phase).toBe('AWAIT_ROLL');
+
+    // Roll starting player into ACTION_PHASE or AWAIT_DECISION -> decline if needed -> ACTION_PHASE
+    const starterId = state.players[state.currentTurnIndex]!.id;
+    const starterSock = starterId === 'player-1' ? 's1' : 's2';
+    const otherId = starterId === 'player-1' ? 'player-2' : 'player-1';
     const roll = manager.handleGameAction({
-      socketId: 's1',
+      socketId: starterSock,
       roomId,
-      action: { type: 'ROLL_DICE', playerId: 'player-1' },
+      action: { type: 'ROLL_DICE', playerId: starterId },
     });
     expect(roll.ok).toBe(true);
     state = roll.gameState!;
     if (state.phase === 'AWAIT_DECISION') {
       manager.handleGameAction({
-        socketId: 's1',
+        socketId: starterSock,
         roomId,
-        action: { type: 'DECLINE_CURRENT_TILE', playerId: 'player-1' },
+        action: { type: 'DECLINE_CURRENT_TILE', playerId: starterId },
       });
     }
 
-    // Player 1 leaves permanently while in ACTION_PHASE -> bankrupts & player 2 wins!
-    const leaveRes = manager.leaveRoom({ socketId: 's1', roomId });
+    // Starting player leaves permanently while in ACTION_PHASE -> bankrupts & remaining player wins!
+    const leaveRes = manager.leaveRoom({ socketId: starterSock, roomId });
     expect(leaveRes.roomDeleted).toBe(false);
     expect(leaveRes.gameState?.phase).toBe('GAME_OVER');
-    expect(leaveRes.gameState?.winnerId).toBe('player-2');
+    expect(leaveRes.gameState?.winnerId).toBe(otherId);
     manager.destroyAll();
   });
 });

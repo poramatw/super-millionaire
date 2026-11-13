@@ -8,6 +8,7 @@ import {
   decideNextBotAction,
   evaluateTradeOffer,
   getCurrentPlayer,
+  getRecommendedBotActionDelayMs,
   type ClientToServerEvents,
   type GameAction,
   type GameState,
@@ -473,7 +474,7 @@ export function useSocketGame(): UseSocketGameResult {
     const action = decideNextBotAction(gs, current.id);
     if (!action) return;
 
-    const delayMs = action.type === 'ROLL_DICE' ? 850 : 750;
+    const delayMs = getRecommendedBotActionDelayMs(gs, action);
     localBotTimerRef.current = window.setTimeout(() => {
       setLocalRoomState((prev) => {
         if (!prev?.gameState) return prev;

@@ -42,6 +42,9 @@ import type {
   RoomConfig,
   TradeOffer,
   TradeOfferInput,
+  TurnOrderRollRecord,
+  TurnOrderRoundRecord,
+  TurnOrderState,
 } from './types.js';
 
 export interface EngineResult {
@@ -169,6 +172,17 @@ function requireCurrentPlayer(
     return { ok: false, error: 'ผู้เล่นนี้ล้มละลายแล้ว' };
   }
   return { ok: true, player: current };
+}
+
+export function canRollTurnOrder(state: GameState, playerId: string): boolean {
+  if (state.phase !== 'TURN_ORDER_ROLL' || !state.turnOrder) return false;
+  const current = getCurrentPlayer(state);
+  return (
+    current.id === playerId &&
+    !current.isBankrupt &&
+    state.turnOrder.contenderIds.includes(playerId) &&
+    !state.turnOrder.rolls[playerId]
+  );
 }
 
 export function canRollAgain(state: GameState, playerId: string): boolean {
@@ -362,6 +376,10 @@ export function canMortgageTile(
   return { allowed: true, proceeds };
 }
 
+export interface CreateGameStateOptions {
+  skipTurnOrderRoll?: boolean;
+}
+
 /**
  * Create a brand-new GameState for 2–8 players (supporting any mix of humans and bots).
  */
@@ -369,6 +387,7 @@ export function createGameState(
   roomId: string,
   config: RoomConfig,
   rng: () => number = Math.random,
+  options?: CreateGameStateOptions,
 ): GameState {
   const totalSeats = config.totalSeats;
   if (totalSeats < 2 || totalSeats > 8) {
@@ -423,18 +442,32 @@ export function createGameState(
     };
   }
 
+  const skipTurnOrderRoll = Boolean(options?.skipTurnOrderRoll);
   const initialBanker = createInitialBankerState();
   const { banker } = recordBankerEntry(initialBanker, {
     type: 'GAME_START',
-    message: `เริ่มเกมซุปเปอร์เศรษฐี (${players.length} ผู้เล่น) ธนาคารแจกเงินเริ่มต้นคนละ ${formatBaht(INITIAL_CASH)}`,
+    message: skipTurnOrderRoll
+      ? `เริ่มเกมซุปเปอร์เศรษฐี (${players.length} ผู้เล่น) ธนาคารแจกเงินเริ่มต้นคนละ ${formatBaht(INITIAL_CASH)}`
+      : `เริ่มเกมซุปเปอร์เศรษฐี (${players.length} ผู้เล่น) แจกเงินคนละ ${formatBaht(INITIAL_CASH)} — ทอยลูกเต๋าหาผู้ได้แต้มสูงสุดเริ่มคนแรก!`,
   });
+
+  const contenderIds = players.map((p) => p.id);
 
   return {
     roomId,
-    phase: 'AWAIT_ROLL',
+    phase: skipTurnOrderRoll ? 'AWAIT_ROLL' : 'TURN_ORDER_ROLL',
     players,
     currentTurnIndex: 0,
     turnNumber: 1,
+    turnOrder: skipTurnOrderRoll
+      ? null
+      : {
+          round: 1,
+          contenderIds,
+          rolls: {},
+          history: [],
+          winnerId: null,
+        },
     doublesCount: 0,
     hasRolledThisTurn: false,
     lastDice: null,
@@ -899,6 +932,254 @@ function resolveLanding(
   }
 }
 
+function findNextUnrolledContenderIndex(
+  state: GameState,
+  contenderIds: readonly string[],
+  rolls: Record<string, DiceRollResult>,
+  fromPlayerIndex: number,
+): number {
+  const unrolled = new Set(
+    contenderIds.filter((id) => {
+      const p = findPlayer(state, id);
+      return Boolean(p && !p.isBankrupt && !rolls[id]);
+    }),
+  );
+  const total = state.players.length;
+  for (let step = 1; step <= total; step++) {
+    const idx = (fromPlayerIndex + step) % total;
+    if (unrolled.has(state.players[idx]!.id)) {
+      return idx;
+    }
+  }
+  for (const cid of contenderIds) {
+    if (unrolled.has(cid)) {
+      const idx = state.players.findIndex((p) => p.id === cid);
+      if (idx >= 0) return idx;
+    }
+  }
+  return getNextActiveTurnIndex(state.players, fromPlayerIndex);
+}
+
+function finalizeTurnOrderWinner(
+  state: GameState,
+  winnerId: string,
+  highestTotal: number,
+  nextHistory: TurnOrderRoundRecord[],
+  finalContenderIds: string[],
+  finalRolls: Record<string, DiceRollResult>,
+  entries: LedgerEntry[],
+  reasonLabel?: string,
+): GameState {
+  const winnerIdx = Math.max(
+    0,
+    state.players.findIndex((p) => p.id === winnerId),
+  );
+  const winner = state.players[winnerIdx]!;
+  let next: GameState = {
+    ...state,
+    phase: 'AWAIT_ROLL',
+    currentTurnIndex: winnerIdx,
+    turnNumber: 1,
+    doublesCount: 0,
+    hasRolledThisTurn: false,
+    pendingDecisionTileIndex: null,
+    turnOrder: {
+      round: state.turnOrder?.round ?? nextHistory.length + 1,
+      contenderIds: finalContenderIds,
+      rolls: finalRolls,
+      history: nextHistory,
+      winnerId,
+    },
+  };
+  next = appendEntry(next, entries, {
+    type: 'TURN_ORDER',
+    actorId: winnerId,
+    message:
+      reasonLabel ??
+      `🏆 ${winner.name} ทอยจัดลำดับได้แต้มสูงสุด ${highestTotal} แต้ม — ได้เริ่มเดินเป็นคนแรก!`,
+  });
+  return next;
+}
+
+function evaluateTurnOrderState(
+  state: GameState,
+  lastActorIndex: number,
+  entries: LedgerEntry[],
+): GameState {
+  const turnOrder = state.turnOrder;
+  if (!turnOrder) return state;
+
+  const activeContenders = turnOrder.contenderIds.filter((id) => {
+    const p = findPlayer(state, id);
+    return Boolean(p && !p.isBankrupt);
+  });
+
+  if (activeContenders.length === 0) {
+    const fallbackWinner = state.players.find((p) => !p.isBankrupt) ?? state.players[0]!;
+    return finalizeTurnOrderWinner(
+      state,
+      fallbackWinner.id,
+      0,
+      turnOrder.history,
+      [fallbackWinner.id],
+      turnOrder.rolls,
+      entries,
+      `🏆 ${fallbackWinner.name} ได้เริ่มเดินเป็นคนแรก!`,
+    );
+  }
+
+  if (activeContenders.length === 1) {
+    const soleId = activeContenders[0]!;
+    const soleRoll = turnOrder.rolls[soleId];
+    const roundRolls: TurnOrderRollRecord[] = soleRoll ? [{ playerId: soleId, roll: soleRoll }] : [];
+    const total = soleRoll?.total ?? 0;
+    const record: TurnOrderRoundRecord = {
+      round: turnOrder.round,
+      contenderIds: activeContenders,
+      rolls: roundRolls,
+      highestTotal: total,
+      tiedLeaderIds: [soleId],
+      winnerId: soleId,
+    };
+    const nextHistory = soleRoll ? [...turnOrder.history, record] : turnOrder.history;
+    const winnerName = findPlayer(state, soleId)?.name ?? soleId;
+    return finalizeTurnOrderWinner(
+      state,
+      soleId,
+      total,
+      nextHistory,
+      activeContenders,
+      turnOrder.rolls,
+      entries,
+      soleRoll
+        ? undefined
+        : `🏆 ${winnerName} เป็นผู้ทอยคนสุดท้ายที่เหลืออยู่ — ได้เริ่มเดินเป็นคนแรก!`,
+    );
+  }
+
+  const allRolled = activeContenders.every((id) => Boolean(turnOrder.rolls[id]));
+  if (!allRolled) {
+    const nextIdx = findNextUnrolledContenderIndex(
+      state,
+      activeContenders,
+      turnOrder.rolls,
+      lastActorIndex,
+    );
+    return {
+      ...state,
+      currentTurnIndex: nextIdx,
+      turnOrder: {
+        ...turnOrder,
+        contenderIds: activeContenders,
+      },
+    };
+  }
+
+  const roundRolls: TurnOrderRollRecord[] = activeContenders.map((id) => ({
+    playerId: id,
+    roll: turnOrder.rolls[id]!,
+  }));
+  const highestTotal = Math.max(...roundRolls.map((r) => r.roll.total));
+  const tiedSet = new Set(
+    roundRolls.filter((r) => r.roll.total === highestTotal).map((r) => r.playerId),
+  );
+  // Keep seat order consistent across rounds
+  const tiedLeaderIds = state.players.filter((p) => tiedSet.has(p.id)).map((p) => p.id);
+
+  if (tiedLeaderIds.length === 1) {
+    const winnerId = tiedLeaderIds[0]!;
+    const record: TurnOrderRoundRecord = {
+      round: turnOrder.round,
+      contenderIds: activeContenders,
+      rolls: roundRolls,
+      highestTotal,
+      tiedLeaderIds,
+      winnerId,
+    };
+    return finalizeTurnOrderWinner(
+      state,
+      winnerId,
+      highestTotal,
+      [...turnOrder.history, record],
+      activeContenders,
+      turnOrder.rolls,
+      entries,
+    );
+  }
+
+  const record: TurnOrderRoundRecord = {
+    round: turnOrder.round,
+    contenderIds: activeContenders,
+    rolls: roundRolls,
+    highestTotal,
+    tiedLeaderIds,
+    winnerId: null,
+  };
+  const firstNextIdx = Math.max(
+    0,
+    state.players.findIndex((p) => p.id === tiedLeaderIds[0]),
+  );
+  const tiedNames = tiedLeaderIds.map((id) => findPlayer(state, id)?.name ?? id).join(', ');
+  let next: GameState = {
+    ...state,
+    phase: 'TURN_ORDER_ROLL',
+    currentTurnIndex: firstNextIdx,
+    hasRolledThisTurn: false,
+    turnOrder: {
+      round: turnOrder.round + 1,
+      contenderIds: tiedLeaderIds,
+      rolls: {},
+      history: [...turnOrder.history, record],
+      winnerId: null,
+    },
+  };
+  next = appendEntry(next, entries, {
+    type: 'TURN_ORDER',
+    message: `🎲 รอบจัดลำดับ #${turnOrder.round} เสมอกันที่แต้มสูงสุด ${highestTotal} (${tiedNames}) — ให้ผู้ที่ได้สูงสุดเท่ากันทอยใหม่อีกครั้ง!`,
+  });
+  return next;
+}
+
+function rollTurnOrderDice(
+  state: GameState,
+  playerId: string,
+  rollInput?: RollInput,
+): EngineResult {
+  const turnOrder = state.turnOrder;
+  if (!turnOrder || !turnOrder.contenderIds.includes(playerId)) {
+    return fail(state, 'คุณไม่ได้อยู่ในรายชื่อผู้ทอยจัดลำดับรอบนี้');
+  }
+  if (turnOrder.rolls[playerId]) {
+    return fail(state, 'คุณทอยลูกเต๋าจัดลำดับในรอบนี้แล้ว');
+  }
+
+  const player = findPlayer(state, playerId)!;
+  const dice = rollTwoDice(rollInput);
+  const entries: LedgerEntry[] = [];
+
+  let next: GameState = {
+    ...state,
+    lastDice: dice,
+    hasRolledThisTurn: false,
+    turnOrder: {
+      ...turnOrder,
+      rolls: {
+        ...turnOrder.rolls,
+        [playerId]: dice,
+      },
+    },
+  };
+
+  next = appendEntry(next, entries, {
+    type: 'DICE_ROLL',
+    actorId: playerId,
+    message: `${player.name} ทอยจัดลำดับ (รอบที่ ${turnOrder.round}) ได้ ${dice.die1} + ${dice.die2} = ${dice.total} แต้ม`,
+  });
+
+  next = evaluateTurnOrderState(next, state.currentTurnIndex, entries);
+  return ok(next, entries);
+}
+
 export function rollDice(
   state: GameState,
   playerId: string,
@@ -907,6 +1188,10 @@ export function rollDice(
   const check = requireCurrentPlayer(state, playerId);
   if (!check.ok) return fail(state, check.error);
   const player = check.player;
+
+  if (state.phase === 'TURN_ORDER_ROLL') {
+    return rollTurnOrderDice(state, playerId, rollInput);
+  }
 
   const isInitialRoll = state.phase === 'AWAIT_ROLL' && !state.hasRolledThisTurn;
   const isDoublesReroll = canRollAgain(state, playerId);
@@ -1407,7 +1692,11 @@ export function declareBankruptcy(state: GameState, playerId: string): EngineRes
   if (!check.ok) return fail(state, check.error);
   const player = check.player;
 
-  if (state.phase !== 'AWAIT_DEBT_RESOLUTION' && state.phase !== 'ACTION_PHASE') {
+  if (
+    state.phase !== 'AWAIT_DEBT_RESOLUTION' &&
+    state.phase !== 'ACTION_PHASE' &&
+    state.phase !== 'TURN_ORDER_ROLL'
+  ) {
     return fail(state, 'ไม่สามารถประกาศล้มละลายในขั้นตอนนี้ได้');
   }
 
@@ -1528,6 +1817,18 @@ export function declareBankruptcy(state: GameState, playerId: string): EngineRes
         : 'จบเกม!',
     });
     return ok(next, entries);
+  }
+
+  if (state.phase === 'TURN_ORDER_ROLL' && next.turnOrder) {
+    const cleaned: GameState = {
+      ...next,
+      turnOrder: {
+        ...next.turnOrder,
+        contenderIds: next.turnOrder.contenderIds.filter((id) => id !== playerId),
+      },
+    };
+    const resolved = evaluateTurnOrderState(cleaned, next.currentTurnIndex, entries);
+    return ok(resolved, entries);
   }
 
   // Advance to next active player's turn

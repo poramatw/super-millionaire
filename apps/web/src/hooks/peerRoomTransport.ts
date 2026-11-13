@@ -7,6 +7,7 @@ import {
   decideNextBotAction,
   evaluateTradeOffer,
   getCurrentPlayer,
+  getRecommendedBotActionDelayMs,
   type BotStyle,
   type GameAction,
   type LedgerEntry,
@@ -788,7 +789,7 @@ export class PeerRoomHost {
     const action = decideNextBotAction(gs, current.id);
     if (!action) return;
 
-    const delayMs = action.type === 'ROLL_DICE' ? 850 : 750;
+    const delayMs = getRecommendedBotActionDelayMs(gs, action);
     this.botTimer = window.setTimeout(() => {
       if (this.destroyed || !this.room.gameState) return;
       const curr = getCurrentPlayer(this.room.gameState);

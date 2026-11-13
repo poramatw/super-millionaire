@@ -46,6 +46,7 @@ export interface RoomConfig {
 
 export type GamePhase =
   | 'LOBBY'
+  | 'TURN_ORDER_ROLL'
   | 'AWAIT_ROLL'
   | 'AWAIT_DECISION'
   | 'AWAIT_DEBT_RESOLUTION'
@@ -120,6 +121,7 @@ export interface PlayerState {
 
 export type LedgerEntryType =
   | 'GAME_START'
+  | 'TURN_ORDER'
   | 'PASS_START'
   | 'DICE_ROLL'
   | 'BUY_DEED'
@@ -196,12 +198,35 @@ export interface DrawnCardInfo {
   turnNumber: number;
 }
 
+export interface TurnOrderRollRecord {
+  playerId: string;
+  roll: DiceRollResult;
+}
+
+export interface TurnOrderRoundRecord {
+  round: number;
+  contenderIds: string[];
+  rolls: TurnOrderRollRecord[];
+  highestTotal: number;
+  tiedLeaderIds: string[];
+  winnerId: string | null;
+}
+
+export interface TurnOrderState {
+  round: number;
+  contenderIds: string[];
+  rolls: Record<string, DiceRollResult>;
+  history: TurnOrderRoundRecord[];
+  winnerId: string | null;
+}
+
 export interface GameState {
   roomId: string;
   phase: GamePhase;
   players: PlayerState[];
   currentTurnIndex: number;
   turnNumber: number;
+  turnOrder: TurnOrderState | null;
   doublesCount: number;
   hasRolledThisTurn: boolean;
   lastDice: DiceRollResult | null;

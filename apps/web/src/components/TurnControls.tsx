@@ -4,6 +4,7 @@ import {
   canBuildOnCurrentTile,
   canMortgageTile,
   canRollAgain,
+  canRollTurnOrder,
   canSellHouseOnTile,
   canUnmortgageCurrentTile,
   getCurrentPlayer,
@@ -44,6 +45,20 @@ export interface TurnControlsProps {
   onSelectTile: (tileIndex: number) => void;
 }
 
+export function getTurnRollButtonLabel(
+  gameState: GameState,
+  canRollDoubles: boolean,
+): string {
+  if (gameState.phase === 'TURN_ORDER_ROLL') {
+    const round = gameState.turnOrder?.round ?? 1;
+    return round > 1 ? `ทอยตัดสินเสมอ (รอบ ${round})!` : 'ทอยลูกเต๋าจัดลำดับ';
+  }
+  const currentPlayer = getCurrentPlayer(gameState);
+  if (currentPlayer.inJail) return 'ทอยลุ้นเบิ้ลออกคุก (ไม่เบิ้ลหยุดเดิน)';
+  if (canRollDoubles) return 'ทอยเบิ้ลอีกครั้ง!';
+  return 'ทอยลูกเต๋า 2 ลูก';
+}
+
 function DiceFace({ value, rolling }: { value: number; rolling: boolean }) {
   const safeVal = Math.max(1, Math.min(6, Math.trunc(value))) as DiceValue;
   return <Dice3D value={safeVal} rolling={rolling} size={40} />;
@@ -67,7 +82,9 @@ export function TurnControls({
   const isMyTurn = Boolean(myPlayerId && currentPlayer.id === myPlayerId && !isSpectator);
   const effectivePlayerId = myPlayerId ?? currentPlayer.id;
 
-  const canRollInitial = gameState.phase === 'AWAIT_ROLL' && !gameState.hasRolledThisTurn;
+  const canRollInitial =
+    (gameState.phase === 'AWAIT_ROLL' && !gameState.hasRolledThisTurn) ||
+    canRollTurnOrder(gameState, currentPlayer.id);
   const canRollDoubles = canRollAgain(gameState, currentPlayer.id);
   const showRollButton = isMyTurn && !isAnimatingMove && (canRollInitial || canRollDoubles);
 
@@ -120,6 +137,10 @@ export function TurnControls({
 
   const phaseText: Record<GameState['phase'], string> = {
     LOBBY: 'รอเริ่มเกม',
+    TURN_ORDER_ROLL:
+      (gameState.turnOrder?.round ?? 1) > 1
+        ? `รอบตัดสินเสมอ #${gameState.turnOrder?.round} — ทอยหาผู้เริ่มคนแรก`
+        : 'สุ่มลำดับการเริ่มเกม — ทอยหาแต้มสูงสุด',
     AWAIT_ROLL: currentPlayer.inJail ? 'อยู่ในคุก — เลือกวิธีออกหรือทอยลูกเต๋า' : 'รอทอยลูกเต๋า 2 ลูก',
     AWAIT_DECISION: 'ตัดสินใจซื้อโฉนด (ไม่มีการประมูล)',
     AWAIT_DEBT_RESOLUTION: 'ต้องชำระหนี้ — ขายบ้านหรือจำนองโฉนด',
@@ -129,7 +150,15 @@ export function TurnControls({
     GAME_OVER: 'จบเกมแล้ว',
   };
 
-  const activeDice = isThrowingDice && thrownDiceFaces ? thrownDiceFaces : gameState.lastDice;
+  const showDiceValue =
+    isThrowingDice || gameState.hasRolledThisTurn || gameState.phase === 'TURN_ORDER_ROLL';
+  const activeDice =
+    showDiceValue && isThrowingDice && thrownDiceFaces
+      ? thrownDiceFaces
+      : showDiceValue
+        ? gameState.lastDice
+        : null;
+  const rollLabel = getTurnRollButtonLabel(gameState, canRollDoubles);
 
   return (
     <div className="luxury-glass-panel flex flex-col gap-3 rounded-2xl p-3.5 text-amber-50">
@@ -153,14 +182,20 @@ export function TurnControls({
           <p className="mt-0.5 text-xs font-medium text-amber-100/75">
             {phaseText[gameState.phase]}
           </p>
-          <button
-            type="button"
-            onClick={() => onSelectTile(currentTile.index)}
-            className="mt-1 text-left text-[11px] font-semibold text-emerald-300 underline decoration-dotted underline-offset-2 hover:text-emerald-200"
-          >
-            ยืนอยู่ที่: {currentTile.deedNumber !== undefined ? `#${currentTile.deedNumber} ` : ''}
-            {currentTile.name}
-          </button>
+          {gameState.phase === 'TURN_ORDER_ROLL' ? (
+            <div className="mt-1 text-[11px] font-semibold text-amber-300/90">
+              กำลังจัดลำดับการเริ่มเกม (ทุกคนอยู่ที่จุดเริ่มต้น)
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onSelectTile(currentTile.index)}
+              className="mt-1 text-left text-[11px] font-semibold text-emerald-300 underline decoration-dotted underline-offset-2 hover:text-emerald-200"
+            >
+              ยืนอยู่ที่: {currentTile.deedNumber !== undefined ? `#${currentTile.deedNumber} ` : ''}
+              {currentTile.name}
+            </button>
+          )}
         </div>
 
         {/* 2-Dice Tray */}
@@ -261,13 +296,7 @@ export function TurnControls({
           className="tactile-btn hidden lg:flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300/60 bg-gradient-to-b from-[#228d4f] to-[#155e34] px-4 py-3 text-base font-extrabold text-amber-50 shadow-[0_6px_18px_rgba(16,185,129,0.28)] hover:brightness-110"
         >
           <Dices className="h-5 w-5 text-amber-200" />
-          <span>
-            {currentPlayer.inJail
-              ? 'ทอยลุ้นเบิ้ลออกคุก (ไม่เบิ้ลหยุดเดิน)'
-              : canRollDoubles
-                ? 'ทอยเบิ้ลอีกครั้ง!'
-                : 'ทอยลูกเต๋า 2 ลูก'}
-          </span>
+          <span>{rollLabel}</span>
         </button>
       )}
 

@@ -49,6 +49,14 @@ function twoPlayerConfig(): RoomConfig {
   };
 }
 
+function createStartedGameState(
+  roomId = 'room-1',
+  config: RoomConfig = twoPlayerConfig(),
+  seed = 1,
+): GameState {
+  return createGameState(roomId, config, createSeededRng(seed), { skipTurnOrderRoll: true });
+}
+
 describe('boardData & banknotes', () => {
   it('defines exact 40 tiles and 29 deeds matching ซุปเปอร์เศรษฐี No. 9028', () => {
     expect(BOARD_TILES).toHaveLength(40);
@@ -94,9 +102,138 @@ describe('boardData & banknotes', () => {
   });
 });
 
+describe('turn order determination roll (TURN_ORDER_ROLL)', () => {
+  it('picks the single highest roller to go first and starts AWAIT_ROLL cleanly', () => {
+    const config: RoomConfig = {
+      totalSeats: 3,
+      slots: [
+        { seatIndex: 0, kind: 'human', name: 'เอ' },
+        { seatIndex: 1, kind: 'human', name: 'บี' },
+        { seatIndex: 2, kind: 'human', name: 'ซี' },
+      ],
+    };
+    let state = createGameState('room-order-1', config, createSeededRng(10));
+    expect(state.phase).toBe('TURN_ORDER_ROLL');
+    expect(state.turnOrder?.round).toBe(1);
+    expect(state.turnOrder?.contenderIds).toEqual(['player-1', 'player-2', 'player-3']);
+    expect(state.currentTurnIndex).toBe(0);
+
+    // Non-current player cannot roll out of order
+    expect(rollDice(state, 'player-2', [6, 6]).ok).toBe(false);
+
+    state = rollDice(state, 'player-1', [3, 3]).state; // 6
+    expect(state.phase).toBe('TURN_ORDER_ROLL');
+    expect(state.currentTurnIndex).toBe(1);
+
+    state = rollDice(state, 'player-2', [5, 4]).state; // 9 (winner)
+    expect(state.phase).toBe('TURN_ORDER_ROLL');
+    expect(state.currentTurnIndex).toBe(2);
+
+    const lastRes = rollDice(state, 'player-3', [2, 4]); // 6
+    expect(lastRes.ok).toBe(true);
+    state = lastRes.state;
+
+    expect(state.phase).toBe('AWAIT_ROLL');
+    expect(state.currentTurnIndex).toBe(1); // player-2 goes first
+    expect(state.hasRolledThisTurn).toBe(false);
+    expect(state.turnOrder?.winnerId).toBe('player-2');
+    expect(state.players.every((p) => p.position === 0)).toBe(true);
+
+    // Winner plays Turn 1 and passes clockwise to player-3
+    state = rollDice(state, 'player-2', [1, 1]).state; // double 2 -> chest (or stays turn)
+    if (state.phase === 'AWAIT_DECISION') {
+      state = declineCurrentTile(state, 'player-2').state;
+    }
+    if (canRollAgain(state, 'player-2')) {
+      state = rollDice(state, 'player-2', [1, 2]).state;
+      if (state.phase === 'AWAIT_DECISION') {
+        state = declineCurrentTile(state, 'player-2').state;
+      }
+    }
+    if (state.phase === 'ACTION_PHASE') {
+      const endRes = endTurn(state, 'player-2');
+      expect(endRes.ok).toBe(true);
+      expect(endRes.state.currentTurnIndex).toBe(2); // clockwise to player-3
+    }
+  });
+
+  it('rerolls ONLY tied highest-scoring contenders across multiple tie rounds until 1 winner emerges', () => {
+    const config: RoomConfig = {
+      totalSeats: 4,
+      slots: [
+        { seatIndex: 0, kind: 'human', name: 'ผู้เล่น 1' },
+        { seatIndex: 1, kind: 'human', name: 'ผู้เล่น 2' },
+        { seatIndex: 2, kind: 'human', name: 'ผู้เล่น 3' },
+        { seatIndex: 3, kind: 'human', name: 'ผู้เล่น 4' },
+      ],
+    };
+    let state = createGameState('room-tie', config, createSeededRng(7));
+
+    // Round 1: player-1 (8), player-2 (5), player-3 (8), player-4 (3)
+    state = rollDice(state, 'player-1', [4, 4]).state;
+    state = rollDice(state, 'player-2', [2, 3]).state;
+    state = rollDice(state, 'player-3', [3, 5]).state;
+    state = rollDice(state, 'player-4', [1, 2]).state;
+
+    expect(state.phase).toBe('TURN_ORDER_ROLL');
+    expect(state.turnOrder?.round).toBe(2);
+    expect(state.turnOrder?.contenderIds).toEqual(['player-1', 'player-3']);
+    expect(state.currentTurnIndex).toBe(0);
+    expect(state.turnOrder?.history).toHaveLength(1);
+    expect(state.turnOrder?.history[0]?.tiedLeaderIds).toEqual(['player-1', 'player-3']);
+
+    // Eliminated players cannot roll in Round 2
+    expect(rollDice(state, 'player-2', [6, 6]).ok).toBe(false);
+    expect(rollDice(state, 'player-4', [6, 6]).ok).toBe(false);
+
+    // Round 2: tie again (player-1 = 7, player-3 = 7) -> triggers Round 3
+    state = rollDice(state, 'player-1', [3, 4]).state;
+    expect(state.currentTurnIndex).toBe(2); // skips player-2 cleanly!
+    state = rollDice(state, 'player-3', [2, 5]).state;
+
+    expect(state.phase).toBe('TURN_ORDER_ROLL');
+    expect(state.turnOrder?.round).toBe(3);
+    expect(state.turnOrder?.contenderIds).toEqual(['player-1', 'player-3']);
+    expect(state.turnOrder?.history).toHaveLength(2);
+
+    // Round 3: player-1 = 6, player-3 = 10 -> player-3 wins!
+    state = rollDice(state, 'player-1', [3, 3]).state;
+    state = rollDice(state, 'player-3', [4, 6]).state;
+
+    expect(state.phase).toBe('AWAIT_ROLL');
+    expect(state.currentTurnIndex).toBe(2);
+    expect(state.turnOrder?.winnerId).toBe('player-3');
+    expect(state.turnOrder?.history).toHaveLength(3);
+  });
+
+  it('resolves turn order cleanly if a tied contender leaves/bankrupts mid-roll', () => {
+    const config: RoomConfig = {
+      totalSeats: 3,
+      slots: [
+        { seatIndex: 0, kind: 'human', name: 'หนึ่ง' },
+        { seatIndex: 1, kind: 'human', name: 'สอง' },
+        { seatIndex: 2, kind: 'human', name: 'สาม' },
+      ],
+    };
+    let state = createGameState('room-leave-order', config, createSeededRng(3));
+    state = rollDice(state, 'player-1', [4, 4]).state; // 8
+    state = rollDice(state, 'player-2', [5, 3]).state; // 8
+    state = rollDice(state, 'player-3', [1, 2]).state; // 3
+
+    expect(state.phase).toBe('TURN_ORDER_ROLL');
+    expect(state.turnOrder?.contenderIds).toEqual(['player-1', 'player-2']);
+
+    const b = declareBankruptcy(state, 'player-1');
+    expect(b.ok).toBe(true);
+    expect(b.state.phase).toBe('AWAIT_ROLL');
+    expect(b.state.turnOrder?.winnerId).toBe('player-2');
+    expect(b.state.currentTurnIndex).toBe(1);
+  });
+});
+
 describe('no-auction & basic turn flow', () => {
   it('leaves deed unowned on declineCurrentTile without auction', () => {
-    let state = createGameState('room-1', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-1', twoPlayerConfig(), 1);
     // Roll 1 + 2 = 3 -> นครปฐม (#2)
     const r1 = rollDice(state, 'player-1', [1, 2]);
     expect(r1.ok).toBe(true);
@@ -117,7 +254,7 @@ describe('no-auction & basic turn flow', () => {
   });
 
   it('does not grant any jackpot on Free Parking (แวะพักผ่อนคนจน)', () => {
-    let state = createGameState('room-1', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-1', twoPlayerConfig(), 1);
     state = {
       ...state,
       players: state.players.map((p, i) => (i === 0 ? { ...p, position: 15 } : p)),
@@ -132,7 +269,7 @@ describe('no-auction & basic turn flow', () => {
 
 describe('land-on-own-tile build & unmortgage enforcement', () => {
   it('requires standing on own tile and full color group + even-build to build houses & hotels', () => {
-    let state = createGameState('room-1', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-1', twoPlayerConfig(), 1);
     // Give player-1 both brown deeds (1: กรุงเทพฯ, 3: นครปฐม), standing on tile 1
     state = {
       ...state,
@@ -204,7 +341,7 @@ describe('land-on-own-tile build & unmortgage enforcement', () => {
   });
 
   it('requires standing on own tile to unmortgage and charges principal + 10% rounded to nearest 10', () => {
-    let state = createGameState('room-1', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-1', twoPlayerConfig(), 1);
     // ดอนเมือง (tile 37): price 3500, mortgage 1750 -> 1750 * 1.1 = 1925 -> 1930 THB
     const tile37 = BOARD_TILES[37]!;
     expect(calculateUnmortgageCost(tile37)).toBe(1930);
@@ -237,7 +374,7 @@ describe('land-on-own-tile build & unmortgage enforcement', () => {
 
 describe('5-hotel, utility, and monopoly rents', () => {
   it('computes 250/500/1000/2000/4000 for 1..5 hotels and 40x/100x for utilities', () => {
-    let state = createGameState('room-1', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-1', twoPlayerConfig(), 1);
     const hotelIndices = [4, 5, 15, 25, 35];
     const expectedRents = [250, 500, 1000, 2000, 4000];
 
@@ -276,7 +413,7 @@ describe('5-hotel, utility, and monopoly rents', () => {
 
 describe('doubles & jail rules', () => {
   it('allows doubles reroll in ACTION_PHASE and sends to jail on 3rd consecutive double', () => {
-    let state = createGameState('room-1', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-1', twoPlayerConfig(), 1);
 
     // Double 1: [1, 1] -> tile 2 (chest)
     const r1 = rollDice(state, 'player-1', [1, 1]);
@@ -290,7 +427,7 @@ describe('doubles & jail rules', () => {
     }
 
     // Fresh state with known safe landing for 3 consecutive doubles test
-    let clean = createGameState('room-2', twoPlayerConfig(), createSeededRng(99));
+    let clean = createStartedGameState('room-2', twoPlayerConfig(), 99);
     // Roll [2, 2] -> tile 4 (hotel, AWAIT_DECISION) -> decline -> ACTION_PHASE
     clean = rollDice(clean, 'player-1', [2, 2]).state;
     clean = declineCurrentTile(clean, 'player-1').state;
@@ -313,7 +450,7 @@ describe('doubles & jail rules', () => {
   });
 
   it('supports Go To Jail tile, bail payment, jail card, and 3rd failed roll forced bail', () => {
-    let state = createGameState('room-1', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-1', twoPlayerConfig(), 1);
     state = {
       ...state,
       players: state.players.map((p, i) => (i === 0 ? { ...p, position: 25 } : p)),
@@ -351,7 +488,7 @@ describe('doubles & jail rules', () => {
     expect(useCard.state.players[0]?.jailFreeCards).toBe(0);
 
     // 3rd failed roll in jail forces 500 THB bail and moves out of jail
-    let jail3 = createGameState('room-jail3', twoPlayerConfig(), createSeededRng(1));
+    let jail3 = createStartedGameState('room-jail3', twoPlayerConfig(), 1);
     jail3 = {
       ...jail3,
       players: jail3.players.map((p, i) =>
@@ -368,7 +505,7 @@ describe('doubles & jail rules', () => {
 
 describe('cards (ประตูดวง & หีบสมบัติ)', () => {
   it('applies MOVE_TO with START bonus, REPAIRS, COLLECT_FROM_ALL, PAY_ALL, and MOVE_BACK', () => {
-    let state = createGameState('room-cards', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-cards', twoPlayerConfig(), 1);
 
     // Force top of chanceDeck to chance-5 (MOVE_TO tile 4, collectStartIfPassed) from position 20 -> lands on 22 (chance)
     state = {
@@ -383,7 +520,7 @@ describe('cards (ประตูดวง & หีบสมบัติ)', () =>
     expect(rMove.state.phase).toBe('AWAIT_DECISION'); // tile 4 unowned
 
     // Force top of chanceDeck to chance-14 (REPAIRS 250/house, 1000/hotel)
-    let repairState = createGameState('room-repairs', twoPlayerConfig(), createSeededRng(1));
+    let repairState = createStartedGameState('room-repairs', twoPlayerConfig(), 1);
     repairState = {
       ...repairState,
       chanceDeck: ['chance-14', ...repairState.chanceDeck.filter((id) => id !== 'chance-14')],
@@ -400,7 +537,7 @@ describe('cards (ประตูดวง & หีบสมบัติ)', () =>
     expect(rRep.state.players[0]?.cash).toBe(13500);
 
     // Force top of chestDeck to chest-9 (COLLECT_FROM_ALL 100) and test MOVE_BACK (chance-6 from 36 -> 33 chest)
-    let comboState = createGameState('room-combo', twoPlayerConfig(), createSeededRng(1));
+    let comboState = createStartedGameState('room-combo', twoPlayerConfig(), 1);
     comboState = {
       ...comboState,
       chanceDeck: ['chance-6', ...comboState.chanceDeck.filter((id) => id !== 'chance-6')],
@@ -417,7 +554,7 @@ describe('cards (ประตูดวง & หีบสมบัติ)', () =>
 
 describe('debt resolution, trading, and bankruptcy', () => {
   it('allows mortgaging any owned tile during AWAIT_DEBT_RESOLUTION and auto-settles debt', () => {
-    let state = createGameState('room-1', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-1', twoPlayerConfig(), 1);
     // Player-1 has 500 cash and owns #1 กรุงเทพฯ (mortgage 300) & #2 นครปฐม (mortgage 300)
     // Player-2 owns #29 เสาชิงช้า (rent 500 -> monopoly or house; let's put 1 house -> rent 2000)
     state = {
@@ -459,7 +596,7 @@ describe('debt resolution, trading, and bankruptcy', () => {
   });
 
   it('transfers assets and ends game on bankruptcy', () => {
-    let state = createGameState('room-1', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-1', twoPlayerConfig(), 1);
     state = {
       ...state,
       deeds: {
@@ -482,7 +619,7 @@ describe('debt resolution, trading, and bankruptcy', () => {
   });
 
   it('executes trade offers cleanly', () => {
-    let state = createGameState('room-1', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-1', twoPlayerConfig(), 1);
     state = {
       ...state,
       phase: 'ACTION_PHASE',
@@ -517,7 +654,7 @@ describe('debt resolution, trading, and bankruptcy', () => {
   });
 
   it('handles selling houses with even-sell enforcement', () => {
-    let state = createGameState('room-1', twoPlayerConfig(), createSeededRng(1));
+    let state = createStartedGameState('room-1', twoPlayerConfig(), 1);
     state = {
       ...state,
       phase: 'ACTION_PHASE',

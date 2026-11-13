@@ -11,6 +11,7 @@ import {
   canBuildOnCurrentTile,
   canMortgageTile,
   canRollAgain,
+  canRollTurnOrder,
   canSellHouseOnTile,
   canUnmortgageCurrentTile,
   getCurrentPlayer,
@@ -157,6 +158,13 @@ export function decideNextBotAction(
   const profile = getStyleProfile(bot);
 
   switch (state.phase) {
+    case 'TURN_ORDER_ROLL': {
+      if (canRollTurnOrder(state, botPlayerId)) {
+        return { type: 'ROLL_DICE', playerId: botPlayerId };
+      }
+      return null;
+    }
+
     case 'AWAIT_ROLL': {
       if (bot.inJail) {
         // Genuine jail detention rule: serve turns trying doubles unless 3rd turn forces bail,
@@ -278,4 +286,23 @@ export function decideNextBotAction(
       return { type: 'END_TURN', playerId: botPlayerId };
     }
   }
+}
+
+/**
+ * Shared client-side timer pacing for AI bot actions so 3D dice throws and
+ * turn-order winner reveals complete cleanly without overlapping animations.
+ */
+export function getRecommendedBotActionDelayMs(state: GameState, action: GameAction): number {
+  if (state.phase === 'TURN_ORDER_ROLL') {
+    return 1050;
+  }
+  if (
+    state.phase === 'AWAIT_ROLL' &&
+    !state.hasRolledThisTurn &&
+    state.turnNumber === 1 &&
+    state.turnOrder?.winnerId
+  ) {
+    return 2100;
+  }
+  return action.type === 'ROLL_DICE' ? 850 : 750;
 }

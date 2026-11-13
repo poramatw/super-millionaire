@@ -13,6 +13,7 @@ export interface BankerPanelProps {
 
 const LEDGER_BADGE_STYLES: Partial<Record<LedgerEntryType, string>> = {
   GAME_START: 'bg-emerald-900/70 text-emerald-200 border-emerald-500/40',
+  TURN_ORDER: 'bg-sky-900/75 text-sky-200 border-sky-400/50',
   PASS_START: 'bg-emerald-900/70 text-emerald-200 border-emerald-500/40',
   BUY_DEED: 'bg-amber-900/70 text-amber-200 border-amber-500/40',
   RENT: 'bg-rose-900/70 text-rose-200 border-rose-500/40',

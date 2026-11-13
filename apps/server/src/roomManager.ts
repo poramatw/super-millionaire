@@ -1183,6 +1183,21 @@ export class RoomManager {
     if (!botId) return;
 
     const roomId = managed.room.roomId;
+    const gs = managed.room.gameState;
+    const isInitialPostTurnOrderWinnerTurn =
+      gs.phase === 'AWAIT_ROLL' &&
+      !gs.hasRolledThisTurn &&
+      gs.turnNumber === 1 &&
+      Boolean(gs.turnOrder?.winnerId);
+    const effectiveDelayMs =
+      this.botDelayMs < 300
+        ? this.botDelayMs
+        : gs.phase === 'TURN_ORDER_ROLL'
+          ? Math.max(this.botDelayMs, 1050)
+          : isInitialPostTurnOrderWinnerTurn
+            ? Math.max(this.botDelayMs, 2100)
+            : this.botDelayMs;
+
     managed.botTimer = setTimeout(() => {
       managed.botTimer = null;
       const currentRoom = this.rooms.get(roomId);
@@ -1202,6 +1217,7 @@ export class RoomManager {
         return;
       }
 
+      const prevPhase = currentRoom.room.gameState.phase;
       const prevTurnNumber = currentRoom.room.gameState.turnNumber;
       const rng = action.type === 'ROLL_DICE' ? cryptoDiceRng : cryptoRng;
       const result = applyGameAction(currentRoom.room.gameState, action, rng);
@@ -1211,7 +1227,11 @@ export class RoomManager {
       }
 
       currentRoom.room.gameState = result.state;
-      if (action.type === 'END_TURN' || result.state.turnNumber !== prevTurnNumber) {
+      if (
+        action.type === 'END_TURN' ||
+        result.state.turnNumber !== prevTurnNumber ||
+        (prevPhase === 'TURN_ORDER_ROLL' && result.state.phase === 'AWAIT_ROLL')
+      ) {
         currentRoom.consecutiveBotSteps = 0;
       } else {
         currentRoom.consecutiveBotSteps += 1;
@@ -1237,6 +1257,6 @@ export class RoomManager {
           this.scheduleBotStep(currentRoom);
         }
       }
-    }, this.botDelayMs);
+    }, effectiveDelayMs);
   }
 }

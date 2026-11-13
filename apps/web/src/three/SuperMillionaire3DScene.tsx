@@ -58,7 +58,7 @@ export interface SuperMillionaire3DSceneProps {
   myPlayerId?: string | null;
   isSpectator?: boolean;
   cameraMode: 'isometric' | 'topdown';
-  followMode: 'turn' | 'owner' | 'off';
+  followMode: 'owner' | 'off';
   focusOwnerTrigger?: number;
   resetCameraTrigger: number;
   isThrowingDice: boolean;
@@ -775,12 +775,19 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
           bundle.cameraLerp.active = false;
         }
       } else if (
-        currentProps.followMode !== 'off' &&
+        currentProps.followMode === 'owner' &&
         currentProps.cameraMode === 'isometric' &&
         !bundle.userManualOverride
       ) {
-        if (bundle.diceThrow.active) {
-          // Keep viewer's current orbit azimuth steady while zooming smoothly over center dice tray
+        const ownerId =
+          !currentProps.isSpectator && currentProps.myPlayerId
+            ? currentProps.myPlayerId
+            : null;
+        const isOwnerDiceThrow = Boolean(
+          bundle.diceThrow.active && ownerId && currentPlayer?.id === ownerId,
+        );
+        if (currentProps.gameState.phase === 'TURN_ORDER_ROLL' || isOwnerDiceThrow) {
+          // Hold steady center framing over the dice tray without spinning during other players' rolls
           const diceDist = 8.4;
           _camGoal.set(
             Math.sin(bundle.orbitYaw) * diceDist,
@@ -790,26 +797,20 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
           _targetGoal.set(0, 0.1, 0);
           camera.position.lerp(_camGoal, 0.085);
           controls.target.lerp(_targetGoal, 0.1);
-        } else {
-          const ownerId =
-            !currentProps.isSpectator && currentProps.myPlayerId
-              ? currentProps.myPlayerId
-              : null;
-          const focusId =
-            currentProps.followMode === 'owner'
-              ? (ownerId ?? currentProps.animatingPlayerId ?? currentPlayer?.id)
-              : (currentProps.animatingPlayerId ?? currentPlayer?.id);
-          const focusToken = focusId ? bundle.tokens.get(focusId) : undefined;
-          if (focusToken) {
-            const tx = focusToken.root.position.x;
-            const tz = focusToken.root.position.z;
-            const desiredYaw = getBoardOrbitAngleForTile(focusToken.tileIndex);
+        } else if (ownerId) {
+          // Anchor camera strictly to the owner's pawn — never spin during other players' turns
+          const ownerToken = bundle.tokens.get(ownerId);
+          if (ownerToken) {
+            const tx = ownerToken.root.position.x;
+            const tz = ownerToken.root.position.z;
+            const desiredYaw = getBoardOrbitAngleForTile(ownerToken.tileIndex);
             const nextYaw = lerpAngle(bundle.orbitYaw, desiredYaw, 0.075);
             bundle.orbitYaw = nextYaw;
 
+            const isOwnerAnimating = currentProps.animatingPlayerId === ownerId;
             _targetGoal.set(tx * 0.46, 0.2, tz * 0.46);
-            const orbitDist = currentProps.animatingPlayerId ? 8.1 : 8.9;
-            const zoomHeight = currentProps.animatingPlayerId ? 6.8 : 7.8;
+            const orbitDist = isOwnerAnimating ? 8.1 : 8.9;
+            const zoomHeight = isOwnerAnimating ? 6.8 : 7.8;
             _camGoal.set(
               _targetGoal.x + Math.sin(nextYaw) * orbitDist,
               zoomHeight,
@@ -1149,7 +1150,11 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
 
     if (props.throwKey > 0 && props.throwKey !== bundle.lastThrowKey) {
       bundle.lastThrowKey = props.throwKey;
-      bundle.userManualOverride = false;
+      const rollerId = props.gameState.players[props.gameState.currentTurnIndex]?.id;
+      const ownerId = !props.isSpectator ? props.myPlayerId : null;
+      if (ownerId && rollerId === ownerId) {
+        bundle.userManualOverride = false;
+      }
       bundle.diceThrow = {
         active: true,
         startMs: performance.now(),
@@ -1180,16 +1185,35 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     };
   }, [props.activeCardDraw]);
 
-  // Re-engage smooth board-orbit focus when turn advances, follow mode enables, or owner walks
+  // Re-engage smooth owner-pawn orbit focus only on owner actions/movement/toggle (never on other players' turns)
+  const ownerId = !props.isSpectator && props.myPlayerId ? props.myPlayerId : null;
+  const currentTurnPlayerId = props.gameState.players[props.gameState.currentTurnIndex]?.id ?? null;
+  const isOwnersTurnNow = Boolean(ownerId && currentTurnPlayerId === ownerId);
+  const ownerDisplayPos = ownerId ? props.displayPositions[ownerId] : undefined;
+  const prevFollowPhaseRef = useRef(props.gameState.phase);
+
   useEffect(() => {
+    const prevPhase = prevFollowPhaseRef.current;
+    prevFollowPhaseRef.current = props.gameState.phase;
+    const justFinishedTurnOrder =
+      prevPhase === 'TURN_ORDER_ROLL' && props.gameState.phase === 'AWAIT_ROLL';
+
     const bundle = sceneBundleRef.current;
     if (!bundle) return;
-    if (props.cameraMode !== 'isometric' || props.followMode === 'off') return;
-    bundle.userManualOverride = false;
-    bundle.cameraLerp.active = false;
+    if (props.cameraMode !== 'isometric' || props.followMode === 'off' || !ownerId) return;
+    if (
+      isOwnersTurnNow ||
+      props.animatingPlayerId === ownerId ||
+      justFinishedTurnOrder
+    ) {
+      bundle.userManualOverride = false;
+      bundle.cameraLerp.active = false;
+    }
   }, [
-    props.gameState.currentTurnIndex,
-    props.gameState.turnNumber,
+    ownerId,
+    isOwnersTurnNow,
+    ownerDisplayPos,
+    props.gameState.phase,
     props.followMode,
     props.focusOwnerTrigger,
     props.animatingPlayerId,

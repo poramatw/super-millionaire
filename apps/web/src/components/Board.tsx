@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   getCurrentPlayer,
   type DiceRollResult,
   type GameState,
 } from '@super-millionaire/shared';
-import { Box, Crosshair, Layers, LocateFixed, RotateCcw } from 'lucide-react';
+import { Box, Layers, LocateFixed, RotateCcw } from 'lucide-react';
 import { SuperMillionaire3DScene } from '../three/SuperMillionaire3DScene';
 
 export interface RecentlyBuiltFx {
@@ -61,13 +61,20 @@ export function Board({
   thrownDiceFaces,
   activeCardDraw = null,
 }: BoardProps) {
+  const currentPlayer = getCurrentPlayer(gameState);
+  const hasOwnPawn = Boolean(myPlayerId && !isSpectator);
   const [cameraMode, setCameraMode] = useState<'isometric' | 'topdown'>('isometric');
-  const [followMode, setFollowMode] = useState<'turn' | 'owner' | 'off'>('turn');
+  const [followMode, setFollowMode] = useState<'owner' | 'off'>(() =>
+    Boolean(myPlayerId && !isSpectator) ? 'owner' : 'off',
+  );
   const [focusOwnerTrigger, setFocusOwnerTrigger] = useState(0);
   const [resetCameraTrigger, setResetCameraTrigger] = useState(0);
 
-  const currentPlayer = getCurrentPlayer(gameState);
-  const hasOwnPawn = Boolean(myPlayerId && !isSpectator);
+  useEffect(() => {
+    if (!hasOwnPawn && followMode === 'owner') {
+      setFollowMode('off');
+    }
+  }, [hasOwnPawn, followMode]);
 
   return (
     <div className="relative w-full">
@@ -118,9 +125,24 @@ export function Board({
               className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/60"
               style={{ backgroundColor: currentPlayer?.color ?? '#E3BE3B' }}
             />
-            <span className="max-w-[130px] truncate sm:max-w-[200px]">
-              ตาที่ <span className="mono-num font-bold text-amber-300">{gameState.turnNumber}</span> •{' '}
-              {currentPlayer?.name}
+            <span className="max-w-[160px] truncate sm:max-w-[230px]">
+              {gameState.phase === 'TURN_ORDER_ROLL' ? (
+                <>
+                  จัดลำดับรอบ{' '}
+                  <span className="mono-num font-bold text-amber-300">
+                    {gameState.turnOrder?.round ?? 1}
+                  </span>{' '}
+                  • {currentPlayer?.name}
+                </>
+              ) : (
+                <>
+                  ตาที่{' '}
+                  <span className="mono-num font-bold text-amber-300">
+                    {gameState.turnNumber}
+                  </span>{' '}
+                  • {currentPlayer?.name}
+                </>
+              )}
             </span>
           </div>
 
@@ -149,40 +171,26 @@ export function Board({
               <span>{cameraMode === 'isometric' ? '2.5D' : '2D บน'}</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setCameraMode('isometric');
-                setFollowMode((m) => (m === 'turn' ? 'off' : 'turn'));
-              }}
-              className={`inline-flex min-h-[30px] items-center gap-1 px-2.5 py-1 text-[11px] font-semibold transition sm:text-xs ${
-                followMode === 'turn'
-                  ? 'bg-emerald-950/85 text-emerald-200'
-                  : 'text-stone-300 hover:text-amber-100'
-              }`}
-              title="หมุนและเลื่อนกล้องตามตัวเดินที่กำลังเล่น"
-            >
-              <Crosshair className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">ตามเทิร์น</span>
-            </button>
-
             {hasOwnPawn && (
               <button
                 type="button"
                 onClick={() => {
                   setCameraMode('isometric');
-                  setFollowMode((m) => (m === 'owner' ? 'turn' : 'owner'));
-                  setFocusOwnerTrigger((n) => n + 1);
+                  setFollowMode((m) => {
+                    const next = m === 'owner' ? 'off' : 'owner';
+                    if (next === 'owner') setFocusOwnerTrigger((n) => n + 1);
+                    return next;
+                  });
                 }}
                 className={`inline-flex min-h-[30px] items-center gap-1 px-2.5 py-1 text-[11px] font-semibold transition sm:text-xs ${
                   followMode === 'owner'
                     ? 'bg-amber-500/90 text-stone-950'
                     : 'text-amber-200/90 hover:bg-stone-800/80 hover:text-amber-100'
                 }`}
-                title="หมุนกระดานหันมาโฟกัสตำแหน่งหมากของคุณตลอดเวลา"
+                title="หมุนกระดานหันมาโฟกัสเฉพาะตำแหน่งหมากของคุณ (ไม่หมุนตามคนอื่น)"
               >
                 <LocateFixed className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">หมากฉัน</span>
+                <span className="hidden sm:inline">ตามหมากฉัน</span>
               </button>
             )}
 

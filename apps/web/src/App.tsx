@@ -5,6 +5,7 @@ import {
   calculatePlayerNetWorth,
   canBuildOnCurrentTile,
   canRollAgain,
+  canRollTurnOrder,
   canUnmortgageCurrentTile,
   getCurrentPlayer,
   getTile,
@@ -48,7 +49,8 @@ import { LobbyView } from './components/LobbyView';
 import { PlayerStrip } from './components/PlayerStrip';
 import { TileModal } from './components/TileModal';
 import { TradeModal } from './components/TradeModal';
-import { TurnControls } from './components/TurnControls';
+import { TurnControls, getTurnRollButtonLabel } from './components/TurnControls';
+import { TurnOrderBanner } from './components/TurnOrderBanner';
 import { UnoDeedHand } from './components/UnoDeedHand';
 import { WalletDeedsPanel } from './components/WalletDeedsPanel';
 import { useSocketGame } from './hooks/useSocketGame';
@@ -68,8 +70,11 @@ function deriveQuickTurnActions(
   const isMyTurn = Boolean(myPlayerId && currentPlayer.id === myPlayerId && !isSpectator);
   const effectivePlayerId = myPlayerId ?? currentPlayer.id;
 
-  const canRollInitial = gameState.phase === 'AWAIT_ROLL' && !gameState.hasRolledThisTurn;
+  const canRollInitial =
+    (gameState.phase === 'AWAIT_ROLL' && !gameState.hasRolledThisTurn) ||
+    canRollTurnOrder(gameState, currentPlayer.id);
   const canRollDoubles = canRollAgain(gameState, currentPlayer.id);
+  const rollButtonLabel = getTurnRollButtonLabel(gameState, canRollDoubles);
   const buildCheck = isMyTurn ? canBuildOnCurrentTile(gameState, currentPlayer.id) : { allowed: false };
   const unmortgageCheck = isMyTurn
     ? canUnmortgageCurrentTile(gameState, currentPlayer.id)
@@ -95,6 +100,7 @@ function deriveQuickTurnActions(
     effectivePlayerId,
     canRollInitial,
     canRollDoubles,
+    rollButtonLabel,
     buildCheck,
     unmortgageCheck,
     canEndTurn,
@@ -126,6 +132,7 @@ function CollapsedDesktopTurnDock({
     effectivePlayerId,
     canRollInitial,
     canRollDoubles,
+    rollButtonLabel,
     buildCheck,
     unmortgageCheck,
     canEndTurn,
@@ -154,12 +161,13 @@ function CollapsedDesktopTurnDock({
                 ติดคุก ({Math.min(3, currentPlayer.jailTurns + 1)}/3)
               </span>
             )}
-            {gameState.lastDice && (
-              <span className="mono-num rounded bg-black/45 px-1.5 py-0.5 text-[11px] font-bold text-emerald-300 ring-1 ring-emerald-400/30">
-                เต๋า {gameState.lastDice.die1} + {gameState.lastDice.die2} ={' '}
-                {gameState.lastDice.total}
-              </span>
-            )}
+            {(gameState.hasRolledThisTurn || gameState.phase === 'TURN_ORDER_ROLL') &&
+              gameState.lastDice && (
+                <span className="mono-num rounded bg-black/45 px-1.5 py-0.5 text-[11px] font-bold text-emerald-300 ring-1 ring-emerald-400/30">
+                  เต๋า {gameState.lastDice.die1} + {gameState.lastDice.die2} ={' '}
+                  {gameState.lastDice.total}
+                </span>
+              )}
           </div>
         </div>
       </div>
@@ -169,7 +177,7 @@ function CollapsedDesktopTurnDock({
           <>
             {(canRollInitial || canRollDoubles) && (
               <>
-                {canRollInitial && currentPlayer.inJail && (
+                {gameState.phase === 'AWAIT_ROLL' && canRollInitial && currentPlayer.inJail && (
                   <>
                     <button
                       type="button"
@@ -203,13 +211,7 @@ function CollapsedDesktopTurnDock({
                   className="tactile-btn inline-flex items-center gap-1.5 rounded-xl border border-emerald-300/60 bg-gradient-to-b from-[#228d4f] to-[#155e34] px-4 py-1.5 text-xs font-extrabold text-amber-50 shadow"
                 >
                   <Dices className="h-4 w-4 text-amber-200" />
-                  <span>
-                    {currentPlayer.inJail
-                      ? 'ทอยลุ้นเบิ้ลออกคุก'
-                      : canRollDoubles
-                        ? 'ทอยเบิ้ลอีกครั้ง!'
-                        : 'ทอยลูกเต๋า 2 ลูก'}
-                  </span>
+                  <span>{rollButtonLabel}</span>
                 </button>
               </>
             )}
@@ -360,6 +362,7 @@ function MobileBottomDock({
     effectivePlayerId,
     canRollInitial,
     canRollDoubles,
+    rollButtonLabel,
     buildCheck,
     unmortgageCheck,
     canEndTurn,
@@ -421,13 +424,7 @@ function MobileBottomDock({
               className="tactile-btn flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-[#143d25] bg-[#1b7a43] px-4 py-2.5 text-sm font-extrabold text-amber-50 shadow"
             >
               <Dices className="h-4 w-4" />
-              <span>
-                {currentPlayer.inJail
-                  ? 'ทอยลุ้นเบิ้ลออกคุก'
-                  : canRollDoubles
-                    ? 'ทอยเบิ้ลอีกครั้ง!'
-                    : 'ทอยลูกเต๋า 2 ลูก'}
-              </span>
+              <span>{rollButtonLabel}</span>
             </button>
           </>
         ) : gameState.phase === 'AWAIT_DECISION' && decisionTile ? (
@@ -570,6 +567,7 @@ export default function App() {
   const [cashTransferFx, setCashTransferFx] = useState<CashTransferFx | null>(null);
   const [myCashDelta, setMyCashDelta] = useState<{ amount: number; key: number } | null>(null);
   const [jailAlertBanner, setJailAlertBanner] = useState<{ message: string; key: number } | null>(null);
+  const [showTurnOrderWinnerBanner, setShowTurnOrderWinnerBanner] = useState(false);
   const [isThrowingDice, setIsThrowingDice] = useState(false);
   const [showThrownDiceOverlay, setShowThrownDiceOverlay] = useState(false);
   const [throwKey, setThrowKey] = useState(0);
@@ -598,6 +596,8 @@ export default function App() {
   const pendingWalkSoundsRef = useRef<Array<'cash' | 'card' | 'jail'>>([]);
   const pendingCardRevealRef = useRef<DrawnCardInfo | null>(null);
   const postCardAutoTileRef = useRef<number | null>(null);
+  const turnOrderWinnerTimerRef = useRef<number | null>(null);
+  const prevTurnPhaseRef = useRef<GameState['phase'] | undefined>(undefined);
 
   const triggerCashTransferFx = useCallback((fx: CashTransferFx) => {
     if (cashFxTimerRef.current !== null) window.clearTimeout(cashFxTimerRef.current);
@@ -846,8 +846,48 @@ export default function App() {
       if (cashDeltaTimerRef.current !== null) window.clearTimeout(cashDeltaTimerRef.current);
       if (autoModalTimerRef.current !== null) window.clearTimeout(autoModalTimerRef.current);
       if (jailBannerTimerRef.current !== null) window.clearTimeout(jailBannerTimerRef.current);
+      if (turnOrderWinnerTimerRef.current !== null) {
+        window.clearTimeout(turnOrderWinnerTimerRef.current);
+      }
     };
   }, []);
+
+  // Keep TurnOrderBanner open briefly to celebrate when turn order finishes
+  useEffect(() => {
+    if (!gameState) {
+      prevTurnPhaseRef.current = undefined;
+      setShowTurnOrderWinnerBanner(false);
+      if (turnOrderWinnerTimerRef.current !== null) {
+        window.clearTimeout(turnOrderWinnerTimerRef.current);
+        turnOrderWinnerTimerRef.current = null;
+      }
+      return;
+    }
+
+    const prevPhase = prevTurnPhaseRef.current;
+    prevTurnPhaseRef.current = gameState.phase;
+
+    if (gameState.phase === 'TURN_ORDER_ROLL') {
+      setShowTurnOrderWinnerBanner(false);
+      if (turnOrderWinnerTimerRef.current !== null) {
+        window.clearTimeout(turnOrderWinnerTimerRef.current);
+        turnOrderWinnerTimerRef.current = null;
+      }
+    } else if (
+      prevPhase === 'TURN_ORDER_ROLL' &&
+      gameState.phase === 'AWAIT_ROLL' &&
+      gameState.turnOrder?.winnerId
+    ) {
+      if (turnOrderWinnerTimerRef.current !== null) {
+        window.clearTimeout(turnOrderWinnerTimerRef.current);
+      }
+      setShowTurnOrderWinnerBanner(true);
+      turnOrderWinnerTimerRef.current = window.setTimeout(() => {
+        setShowTurnOrderWinnerBanner(false);
+        turnOrderWinnerTimerRef.current = null;
+      }, 2800);
+    }
+  }, [gameState?.phase, gameState?.turnOrder?.winnerId, gameState]);
 
   // Sound effects & lively dice-throw trigger from new Banker Ledger entries
   useEffect(() => {
@@ -862,6 +902,12 @@ export default function App() {
     if (ledger.length === 0) return;
 
     const latestSeq = ledger[ledger.length - 1]!.seq;
+    if (latestSeq < lastLedgerSeqRef.current) {
+      lastLedgerSeqRef.current = latestSeq;
+      const existingRoll = [...ledger].reverse().find((e) => e.type === 'DICE_ROLL');
+      lastDiceRollSeqRef.current = existingRoll?.seq ?? latestSeq;
+      return;
+    }
     if (lastLedgerSeqRef.current === 0) {
       lastLedgerSeqRef.current = latestSeq;
       const existingRoll = [...ledger].reverse().find((e) => e.type === 'DICE_ROLL');
@@ -1297,6 +1343,24 @@ export default function App() {
                   onExpandSidebar={() => setIsRightPanelCollapsed(false)}
                 />
               )}
+
+              <TurnOrderBanner
+                gameState={gameState}
+                myPlayerId={myPlayerId}
+                isSpectator={isSpectator}
+                visible={Boolean(
+                  gameState.turnOrder &&
+                    (gameState.phase === 'TURN_ORDER_ROLL' ||
+                      (showTurnOrderWinnerBanner && gameState.turnOrder.winnerId)),
+                )}
+                onDismissWinner={() => {
+                  setShowTurnOrderWinnerBanner(false);
+                  if (turnOrderWinnerTimerRef.current !== null) {
+                    window.clearTimeout(turnOrderWinnerTimerRef.current);
+                    turnOrderWinnerTimerRef.current = null;
+                  }
+                }}
+              />
 
               <Board
                 gameState={gameState}
