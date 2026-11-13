@@ -375,10 +375,22 @@ export default function App() {
     const isShortForward = !movedInJail && forwardDist >= 1 && forwardDist <= 12;
     const isShortBackward = !movedInJail && backwardDist >= 1 && backwardDist <= 3;
 
+    const shouldAutoOpenTileModal = Boolean(
+      !movedInJail &&
+        myPlayerId &&
+        !isSpectator &&
+        movedPlayerId === myPlayerId &&
+        gameState.deeds[toPos] &&
+        !gameState.players.find((p) => p.id === movedPlayerId)?.isBankrupt,
+    );
+
     if (!isShortForward && !isShortBackward) {
       setDisplayPositions(nextSnapshot);
       setAnimatingPlayerId(null);
       setHopSpotlightTile(null);
+      if (shouldAutoOpenTileModal) {
+        setSelectedTileIndex(toPos);
+      }
       return;
     }
 
@@ -415,6 +427,9 @@ export default function App() {
           setAnimatingPlayerId(null);
           setHopSpotlightTile(null);
           setDisplayPositions(nextSnapshot);
+          if (shouldAutoOpenTileModal) {
+            setSelectedTileIndex(toPos);
+          }
         }, 240);
       }
     };

@@ -50,13 +50,23 @@ export function TileModal({
   const currentPlayer = getCurrentPlayer(gameState);
   const isMyTurn = Boolean(myPlayerId && currentPlayer.id === myPlayerId);
   const isStandingHere = Boolean(myPlayerId && currentPlayer.id === myPlayerId && currentPlayer.position === tile.index);
+  const canDecideBuy = Boolean(
+    isMyTurn &&
+      isStandingHere &&
+      gameState.phase === 'AWAIT_DECISION' &&
+      gameState.pendingDecisionTileIndex === tile.index &&
+      deed &&
+      !deed.ownerId,
+  );
+  const isOpponentDeed = Boolean(deed?.ownerId && deed.ownerId !== myPlayerId);
+  const isMyDeed = Boolean(deed?.ownerId && deed.ownerId === myPlayerId);
 
   const buildCheck = isMyTurn && isStandingHere
     ? canBuildOnCurrentTile(gameState, myPlayerId!)
-    : { allowed: false };
+    : { allowed: false, reason: undefined, cost: undefined, isHotelUpgrade: false };
   const unmortgageCheck = isMyTurn && isStandingHere
     ? canUnmortgageCurrentTile(gameState, myPlayerId!)
-    : { allowed: false };
+    : { allowed: false, reason: undefined, cost: undefined };
   const sellCheck = isMyTurn
     ? canSellHouseOnTile(gameState, myPlayerId!, tile.index)
     : { allowed: false };
@@ -121,6 +131,45 @@ export function TileModal({
         </div>
 
         <div className="space-y-4 p-4">
+          {/* Contextual Arrival Callout Banner */}
+          {isMyTurn && isStandingHere && deed && (
+            <div
+              className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                canDecideBuy
+                  ? 'border-emerald-600/40 bg-emerald-100/90 text-emerald-950'
+                  : isOpponentDeed
+                    ? 'border-rose-600/40 bg-rose-100/90 text-rose-950'
+                    : buildCheck.allowed || unmortgageCheck.allowed
+                      ? 'border-emerald-600/40 bg-emerald-100/90 text-emerald-950'
+                      : 'border-amber-600/40 bg-amber-100/90 text-amber-950'
+              }`}
+            >
+              {canDecideBuy && (
+                <span>
+                  พื้นที่ว่าง — คุณสามารถซื้อโฉนดนี้ได้ในราคา ฿
+                  {formatBahtNumber(tile.price ?? 0)}
+                </span>
+              )}
+              {isOpponentDeed && owner && (
+                <span>
+                  โฉนดของ {owner.name}
+                  {deed.isMortgaged
+                    ? ' (ติดจำนองอยู่ — ไม่ต้องจ่ายค่าเช่า)'
+                    : ' — ต้องจ่ายค่าเช่าตามระดับสิ่งปลูกสร้าง'}
+                </span>
+              )}
+              {isMyDeed && (
+                <span>
+                  {buildCheck.allowed
+                    ? `ตกซ้ำที่ดินของคุณ — สามารถ${buildCheck.isHotelUpgrade ? 'อัปเกรดเป็นโรงแรม' : 'สร้างบ้านเพิ่ม 1 หลัง'}ได้!`
+                    : unmortgageCheck.allowed
+                      ? 'ตกซ้ำที่ดินของคุณ (ติดจำนอง) — สามารถไถ่ถอนจำนองได้'
+                      : `ตกซ้ำที่ดินของคุณ: ${buildCheck.reason ?? 'จัดการโฉนดหรือกดจบเทิร์น'}`}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Owner & Building Summary */}
           {deed && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#2a2118]/15 bg-white/75 px-3 py-2.5 text-sm">
@@ -244,6 +293,54 @@ export function TileModal({
           {tile.description && (
             <div className="rounded-xl border border-[#2a2118]/15 bg-[#ede1c4]/70 p-3 text-xs leading-relaxed text-stone-800">
               {tile.description}
+            </div>
+          )}
+
+          {/* Contextual Buy / Decline Actions when landing on vacant purchasable tile */}
+          {canDecideBuy && (
+            <div className="space-y-2 border-t border-[#2a2118]/15 pt-3">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={currentPlayer.cash < (tile.price ?? 0)}
+                  onClick={() => {
+                    onDispatchAction({ type: 'BUY_CURRENT_TILE', playerId: myPlayerId! });
+                    onClose();
+                  }}
+                  className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-[#143d25] bg-[#1b7a43] px-3 py-2.5 text-xs font-extrabold text-white shadow disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Coins className="h-4 w-4" />
+                  <span>ซื้อโฉนดนี้ (฿{formatBahtNumber(tile.price ?? 0)})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDispatchAction({ type: 'DECLINE_CURRENT_TILE', playerId: myPlayerId! });
+                    onClose();
+                  }}
+                  className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-stone-600 bg-stone-700 px-3 py-2.5 text-xs font-extrabold text-white shadow"
+                >
+                  <span>ไม่ซื้อ (ผ่าน)</span>
+                </button>
+              </div>
+              {currentPlayer.cash < (tile.price ?? 0) && (
+                <p className="text-center text-[11px] font-semibold text-rose-700">
+                  เงินสดไม่พอสำหรับซื้อโฉนดนี้
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Acknowledge button when landing on an opponent's deed */}
+          {isMyTurn && isStandingHere && isOpponentDeed && (
+            <div className="border-t border-[#2a2118]/15 pt-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="tactile-btn flex w-full items-center justify-center rounded-xl border-2 border-[#2a2118] bg-[#2a2118] px-4 py-2.5 text-xs font-extrabold text-amber-100 shadow"
+              >
+                รับทราบ / ปิดรายละเอียด
+              </button>
             </div>
           )}
 
