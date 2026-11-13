@@ -466,3 +466,70 @@
   animation: pawn-hop 0.4s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
 }
+
+/* Hearthstone / Balatro / UNO Floating Card-Hand Fan */
+.deed-fan-card {
+  transform-origin: center 220%;
+  box-shadow:
+    -4px 8px 18px rgba(0, 0, 0, 0.42),
+    0 2px 4px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  transition:
+    transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 240ms ease,
+    filter 200ms ease;
+  will-change: transform;
+}
+
+.deed-fan-card:hover,
+.deed-fan-card:focus-visible,
+.deed-fan-card[data-selected='true'] {
+  transform: rotate(0deg) translateY(-36px) scale(1.14) !important;
+  z-index: 80 !important;
+  box-shadow:
+    0 20px 36px -6px rgba(0, 0, 0, 0.62),
+    0 0 0 2px #facc15,
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.deed-foil-shimmer {
+  background-image: linear-gradient(
+    125deg,
+    rgba(255, 255, 255, 0) 15%,
+    rgba(255, 244, 179, 0.22) 38%,
+    rgba(167, 243, 208, 0.16) 52%,
+    rgba(255, 255, 255, 0) 75%
+  );
+  background-size: 200% 200%;
+  transition: opacity 220ms ease, background-position 450ms ease;
+}
+
+.deed-fan-card:hover .deed-foil-shimmer,
+.deed-fan-card[data-selected='true'] .deed-foil-shimmer {
+  opacity: 1;
+  background-position: 100% 100%;
+}
+
+/* Collapsible Bottom-Left Player HUD transitions */
+.hud-collapsible {
+  transition:
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease,
+    max-width 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: bottom left;
+}
+
+@keyframes hud-pill-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.hud-pill-enter {
+  animation: hud-pill-in 220ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}

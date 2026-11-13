@@ -11,10 +11,12 @@
   },
   "dependencies": {
     "@super-millionaire/shared": "*",
+    "@types/three": "^0.187.0",
     "lucide-react": "^1.72.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "socket.io-client": "^4.8.4"
+    "socket.io-client": "^4.8.4",
+    "three": "^0.187.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.5",

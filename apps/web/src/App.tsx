@@ -19,6 +19,8 @@ import {
   Building2,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Dices,
   Home,
@@ -268,6 +270,7 @@ export default function App() {
   const [revealedCard, setRevealedCard] = useState<DrawnCardInfo | null>(null);
   const [sidebarTab, setSidebarTab] = useState<DesktopSidebarTab>('players');
   const [mobileTab, setMobileTab] = useState<MobileTab>('board');
+  const [isPlayerHudCollapsed, setIsPlayerHudCollapsed] = useState(false);
   const [inspectedPlayerId, setInspectedPlayerId] = useState<string>('');
   const [displayPositions, setDisplayPositions] = useState<Record<string, number>>({});
   const [animatingPlayerId, setAnimatingPlayerId] = useState<string | null>(null);
@@ -669,7 +672,7 @@ export default function App() {
   const showLobby = !roomState || roomState.status === 'LOBBY' || !gameState;
 
   return (
-    <div className="min-h-dvh w-full overflow-x-hidden bg-[#17120c] text-amber-50">
+    <div className="min-h-dvh w-full max-w-full overflow-x-clip bg-[#17120c] text-amber-50">
       {/* Global Error Toast */}
       {errorToast && (
         <div
@@ -813,10 +816,10 @@ export default function App() {
           </header>
 
           {/* Main Responsive Workspace */}
-          <main className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-4 px-2.5 pt-3 pb-24 sm:px-5 lg:flex-row lg:items-start lg:py-4">
+          <main className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-4 overflow-x-clip px-2.5 pt-3 pb-24 sm:px-5 lg:flex-row lg:items-start lg:py-4">
             {/* Desktop & Mobile Board Pane */}
             <section
-              className={`min-w-0 flex-1 space-y-3 ${
+              className={`min-w-0 max-w-full flex-1 pb-12 lg:pb-6 ${
                 mobileTab === 'board' ? 'block' : 'hidden lg:block'
               }`}
             >
@@ -835,105 +838,20 @@ export default function App() {
                 thrownDiceFaces={thrownDiceFaces}
               />
 
-              {/* Bottom-Left Player Cash HUD + Persistent UNO-Style Title Deed Hand */}
-              {(() => {
-                const myPlayer =
-                  myPlayerId && !isSpectator
-                    ? gameState.players.find((p) => p.id === myPlayerId)
-                    : null;
-                const myNetWorth = myPlayer
-                  ? calculatePlayerNetWorth(gameState, myPlayer.id)
-                  : 0;
-
-                return (
-                  <div
-                    className={`grid grid-cols-1 gap-3 ${
-                      myPlayer ? 'xl:grid-cols-[295px_minmax(0,1fr)] xl:items-stretch' : ''
-                    }`}
-                  >
-                    {myPlayer && (
-                      <div className="relative flex flex-col justify-between rounded-2xl border border-emerald-400/35 bg-gradient-to-br from-[#13251a]/95 to-[#0f1712]/98 p-3 shadow-xl">
-                        {myCashDelta && (
-                          <div
-                            key={myCashDelta.key}
-                            className={`pointer-events-none absolute -top-3 right-3 rounded-full border px-2.5 py-0.5 text-xs font-black shadow-lg ${
-                              myCashDelta.amount > 0
-                                ? 'animate-cash-gain border-emerald-300 bg-emerald-600 text-white'
-                                : 'animate-cash-deduct border-rose-300 bg-rose-600 text-white'
-                            }`}
-                          >
-                            <span className="mono-num">
-                              {myCashDelta.amount > 0 ? '+' : '-'}฿
-                              {formatBahtNumber(Math.abs(myCashDelta.amount))}
-                            </span>
-                          </div>
-                        )}
-
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <div
-                              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-[#f7f0de]"
-                              style={{ boxShadow: `inset 0 0 0 2px ${myPlayer.color}` }}
-                            >
-                              <PlayerToken
-                                tokenId={myPlayer.tokenId}
-                                color={myPlayer.color}
-                                size={26}
-                              />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="truncate text-xs font-extrabold text-amber-100">
-                                {myPlayer.name}
-                              </div>
-                              <div className="text-[10px] text-emerald-300/80">
-                                เงินสดของคุณ
-                              </div>
-                            </div>
-                          </div>
-                          {myPlayer.inJail && (
-                            <span className="rounded-md bg-rose-800 px-1.5 py-0.5 text-[10px] font-bold text-rose-100">
-                              ติดคุก
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="mt-2 flex items-baseline justify-between gap-2">
-                          <div className="mono-num text-2xl font-black text-emerald-300">
-                            ฿{formatBahtNumber(myPlayer.cash)}
-                          </div>
-                          <div className="mono-num text-[11px] font-semibold text-amber-200/85">
-                            สุทธิ ฿{formatBahtNumber(myNetWorth)}
-                          </div>
-                        </div>
-
-                        <div className="mt-2 grid grid-cols-3 gap-1">
-                          {BANKNOTE_DENOMINATIONS.map((denom) => (
-                            <div key={denom} className="flex justify-center">
-                              <ThaiBanknote
-                                denomination={denom}
-                                count={myPlayer.banknotes[denom] ?? 0}
-                                compact
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <UnoDeedHand
-                      gameState={gameState}
-                      myPlayerId={myPlayerId}
-                      isSpectator={isSpectator}
-                      selectedTileIndex={selectedTileIndex}
-                      onSelectTile={(idx) => setSelectedTileIndex(idx)}
-                    />
-                  </div>
-                );
-              })()}
+              {/* True Floating Hearthstone/UNO Deed Hand overlapping bottom edge of 3D stage */}
+              <div className="pointer-events-none relative z-20 -mt-14 sm:-mt-20">
+                <UnoDeedHand
+                  gameState={gameState}
+                  myPlayerId={myPlayerId}
+                  isSpectator={isSpectator}
+                  selectedTileIndex={selectedTileIndex}
+                  onSelectTile={(idx) => setSelectedTileIndex(idx)}
+                />
+              </div>
             </section>
 
             {/* Right Sidebar (Desktop always visible; Mobile renders active subtab) */}
-            <aside className="flex w-full flex-col gap-3 lg:w-[410px] lg:shrink-0 xl:w-[445px]">
+            <aside className="flex w-full min-w-0 max-w-full flex-col gap-3 lg:w-[410px] lg:shrink-0 xl:w-[445px]">
               {/* Desktop TurnControls always pinned at top of sidebar */}
               <div className={mobileTab === 'board' ? 'block' : 'hidden lg:block'}>
                 <TurnControls
@@ -1072,6 +990,127 @@ export default function App() {
               </div>
             </aside>
           </main>
+
+          {/* Collapsible Floating Bottom-Left Player Cash HUD */}
+          {(() => {
+            const myPlayer =
+              myPlayerId && !isSpectator
+                ? gameState.players.find((p) => p.id === myPlayerId)
+                : null;
+            if (!myPlayer) return null;
+            const myNetWorth = calculatePlayerNetWorth(gameState, myPlayer.id);
+
+            return (
+              <div className="fixed bottom-[68px] left-2.5 z-[35] lg:bottom-4 lg:left-4">
+                {myCashDelta && (
+                  <div
+                    key={myCashDelta.key}
+                    className={`pointer-events-none absolute -top-4 right-2 z-10 rounded-full border px-2.5 py-0.5 text-xs font-black shadow-lg ${
+                      myCashDelta.amount > 0
+                        ? 'animate-cash-gain border-emerald-300 bg-emerald-600 text-white'
+                        : 'animate-cash-deduct border-rose-300 bg-rose-600 text-white'
+                    }`}
+                  >
+                    <span className="mono-num">
+                      {myCashDelta.amount > 0 ? '+' : '-'}฿
+                      {formatBahtNumber(Math.abs(myCashDelta.amount))}
+                    </span>
+                  </div>
+                )}
+
+                {isPlayerHudCollapsed ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsPlayerHudCollapsed(false)}
+                    className="hud-collapsible hud-pill-enter flex min-h-[42px] items-center gap-2 rounded-full border border-emerald-400/50 bg-stone-950/92 px-3 py-1.5 text-xs font-extrabold text-amber-100 shadow-2xl backdrop-blur-md hover:border-amber-300"
+                    title="ขยายกระเป๋าเงินของคุณ"
+                  >
+                    <span
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/25 bg-[#f7f0de]"
+                      style={{ boxShadow: `inset 0 0 0 2px ${myPlayer.color}` }}
+                    >
+                      <PlayerToken tokenId={myPlayer.tokenId} color={myPlayer.color} size={20} />
+                    </span>
+                    <span className="mono-num text-sm font-black text-emerald-300">
+                      ฿{formatBahtNumber(myPlayer.cash)}
+                    </span>
+                    {myPlayer.inJail && (
+                      <span className="rounded bg-rose-700 px-1 py-0.5 text-[9px] text-white">
+                        คุก
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-200/85">
+                      ขยาย
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    </span>
+                  </button>
+                ) : (
+                  <div className="hud-collapsible hud-pill-enter w-[264px] max-w-[calc(100vw-20px)] rounded-2xl border border-emerald-400/40 bg-gradient-to-br from-[#13251a]/95 to-[#0f1712]/96 p-3 shadow-2xl backdrop-blur-md">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/20 bg-[#f7f0de]"
+                          style={{ boxShadow: `inset 0 0 0 2px ${myPlayer.color}` }}
+                        >
+                          <PlayerToken
+                            tokenId={myPlayer.tokenId}
+                            color={myPlayer.color}
+                            size={24}
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-extrabold text-amber-100">
+                            {myPlayer.name}
+                          </div>
+                          <div className="text-[10px] text-emerald-300/80">
+                            เงินสดของคุณ
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-1">
+                        {myPlayer.inJail && (
+                          <span className="rounded-md bg-rose-800 px-1.5 py-0.5 text-[9px] font-bold text-rose-100">
+                            ติดคุก
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setIsPlayerHudCollapsed(true)}
+                          className="inline-flex items-center gap-0.5 rounded-lg border border-amber-300/30 bg-stone-900/80 px-2 py-1 text-[10px] font-bold text-amber-200 hover:bg-stone-800"
+                          title="หุบหน้าต่างเงินสด"
+                        >
+                          <span>หุบ</span>
+                          <ChevronDown className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 flex items-baseline justify-between gap-2">
+                      <div className="mono-num text-xl font-black text-emerald-300">
+                        ฿{formatBahtNumber(myPlayer.cash)}
+                      </div>
+                      <div className="mono-num text-[11px] font-semibold text-amber-200/85">
+                        สุทธิ ฿{formatBahtNumber(myNetWorth)}
+                      </div>
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-3 gap-1">
+                      {BANKNOTE_DENOMINATIONS.map((denom) => (
+                        <div key={denom} className="flex justify-center">
+                          <ThaiBanknote
+                            denomination={denom}
+                            count={myPlayer.banknotes[denom] ?? 0}
+                            compact
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Mobile Fixed-Bottom Turn Action Dock (< lg) */}
           <MobileBottomDock
