@@ -4,6 +4,7 @@ import {
   JAIL_BAIL_AMOUNT,
   calculatePlayerNetWorth,
   canBuildOnCurrentTile,
+  canHostileTakeoverCurrentTile,
   canRollAgain,
   canRollTurnOrder,
   canUnmortgageCurrentTile,
@@ -22,8 +23,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Clock,
   Copy,
-  Dices,
   Home,
   KeyRound,
   LayoutGrid,
@@ -39,11 +40,13 @@ import {
   VolumeX,
   Wallet,
   X,
+  Zap,
 } from 'lucide-react';
 import { BankerAvatar, PlayerToken, ThaiBanknote } from './artwork';
 import { BankerPanel } from './components/BankerPanel';
 import { Board, type CashTransferFx, type RecentlyBuiltFx } from './components/Board';
 import { CardRevealModal } from './components/CardRevealModal';
+import { DiceChargeButton } from './components/DiceChargeButton';
 import { GameOverModal } from './components/GameOverModal';
 import { LobbyView } from './components/LobbyView';
 import { PlayerStrip } from './components/PlayerStrip';
@@ -59,6 +62,16 @@ import { soundFX } from './utils/sound';
 
 type DesktopSidebarTab = 'players' | 'wallet' | 'banker';
 type MobileTab = 'board' | 'players' | 'wallet' | 'banker';
+
+function formatElapsedDuration(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const hrs = Math.floor(safe / 3600);
+  const mins = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  const mm = String(mins).padStart(2, '0');
+  const ss = String(secs).padStart(2, '0');
+  return hrs > 0 ? `${hrs}:${mm}:${ss}` : `${mm}:${ss}`;
+}
 
 function deriveQuickTurnActions(
   gameState: GameState,
@@ -78,6 +91,9 @@ function deriveQuickTurnActions(
   const buildCheck = isMyTurn ? canBuildOnCurrentTile(gameState, currentPlayer.id) : { allowed: false };
   const unmortgageCheck = isMyTurn
     ? canUnmortgageCurrentTile(gameState, currentPlayer.id)
+    : { allowed: false };
+  const takeoverCheck = isMyTurn
+    ? canHostileTakeoverCurrentTile(gameState, currentPlayer.id)
     : { allowed: false };
   const canEndTurn =
     isMyTurn &&
@@ -103,6 +119,7 @@ function deriveQuickTurnActions(
     rollButtonLabel,
     buildCheck,
     unmortgageCheck,
+    takeoverCheck,
     canEndTurn,
     canProposeTrade,
     decisionTile,
@@ -135,6 +152,7 @@ function CollapsedDesktopTurnDock({
     rollButtonLabel,
     buildCheck,
     unmortgageCheck,
+    takeoverCheck,
     canEndTurn,
     canProposeTrade,
     decisionTile,
@@ -164,8 +182,8 @@ function CollapsedDesktopTurnDock({
             {(gameState.hasRolledThisTurn || gameState.phase === 'TURN_ORDER_ROLL') &&
               gameState.lastDice && (
                 <span className="mono-num rounded bg-black/45 px-1.5 py-0.5 text-[11px] font-bold text-emerald-300 ring-1 ring-emerald-400/30">
-                  เต๋า {gameState.lastDice.die1} + {gameState.lastDice.die2} ={' '}
-                  {gameState.lastDice.total}
+                  แต้ม {gameState.lastDice.total}
+                  {gameState.lastDice.isDoubles ? ' (เบิ้ล!)' : ''}
                 </span>
               )}
           </div>
@@ -203,16 +221,19 @@ function CollapsedDesktopTurnDock({
                     )}
                   </>
                 )}
-                <button
-                  type="button"
-                  onClick={() =>
-                    onDispatchAction({ type: 'ROLL_DICE', playerId: effectivePlayerId })
+                <DiceChargeButton
+                  label={rollButtonLabel}
+                  enableCharge={gameState.phase !== 'TURN_ORDER_ROLL' && !currentPlayer.inJail}
+                  currentTileIndex={currentPlayer.position}
+                  compact
+                  onRoll={(powerRange) =>
+                    onDispatchAction({
+                      type: 'ROLL_DICE',
+                      playerId: effectivePlayerId,
+                      powerRange,
+                    })
                   }
-                  className="tactile-btn inline-flex items-center gap-1.5 rounded-xl border border-emerald-300/60 bg-gradient-to-b from-[#228d4f] to-[#155e34] px-4 py-1.5 text-xs font-extrabold text-amber-50 shadow"
-                >
-                  <Dices className="h-4 w-4 text-amber-200" />
-                  <span>{rollButtonLabel}</span>
-                </button>
+                />
               </>
             )}
 
@@ -294,6 +315,22 @@ function CollapsedDesktopTurnDock({
                     <span>ไถ่ถอน (฿{formatBahtNumber(unmortgageCheck.cost ?? 0)})</span>
                   </button>
                 )}
+
+                {takeoverCheck.allowed && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onDispatchAction({
+                        type: 'HOSTILE_TAKEOVER_CURRENT_TILE',
+                        playerId: effectivePlayerId,
+                      })
+                    }
+                    className="tactile-btn inline-flex items-center gap-1 rounded-xl border border-amber-300/80 bg-gradient-to-r from-[#7c2d12] via-[#b45309] to-[#7c2d12] px-3 py-1.5 text-xs font-extrabold text-amber-50"
+                  >
+                    <Zap className="h-3.5 w-3.5 text-amber-300" />
+                    <span>ซื้อฮุบ 2× (฿{formatBahtNumber(takeoverCheck.cost ?? 0)})</span>
+                  </button>
+                )}
               </>
             )}
 
@@ -365,6 +402,7 @@ function MobileBottomDock({
     rollButtonLabel,
     buildCheck,
     unmortgageCheck,
+    takeoverCheck,
     canEndTurn,
     decisionTile,
   } = deriveQuickTurnActions(gameState, myPlayerId, isSpectator, isAnimatingMove);
@@ -386,9 +424,7 @@ function MobileBottomDock({
               </span>
             </div>
             <span className="mono-num shrink-0 font-bold text-emerald-300">
-              {myPlayerId && !isSpectator && currentPlayer.id !== myPlayerId
-                ? '฿ •••••'
-                : `฿${formatBahtNumber(currentPlayer.cash)}`}
+              ฿{formatBahtNumber(currentPlayer.cash)}
             </span>
           </div>
         ) : canRollInitial || canRollDoubles ? (
@@ -418,14 +454,19 @@ function MobileBottomDock({
                 )}
               </>
             )}
-            <button
-              type="button"
-              onClick={() => onDispatchAction({ type: 'ROLL_DICE', playerId: effectivePlayerId })}
-              className="tactile-btn flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-[#143d25] bg-[#1b7a43] px-4 py-2.5 text-sm font-extrabold text-amber-50 shadow"
-            >
-              <Dices className="h-4 w-4" />
-              <span>{rollButtonLabel}</span>
-            </button>
+            <DiceChargeButton
+              label={rollButtonLabel}
+              enableCharge={gameState.phase !== 'TURN_ORDER_ROLL' && !currentPlayer.inJail}
+              currentTileIndex={currentPlayer.position}
+              compact
+              onRoll={(powerRange) =>
+                onDispatchAction({
+                  type: 'ROLL_DICE',
+                  playerId: effectivePlayerId,
+                  powerRange,
+                })
+              }
+            />
           </>
         ) : gameState.phase === 'AWAIT_DECISION' && decisionTile ? (
           <>
@@ -499,6 +540,22 @@ function MobileBottomDock({
               >
                 <RotateCcw className="h-4 w-4" />
                 <span>ไถ่ถอน</span>
+              </button>
+            )}
+
+            {takeoverCheck.allowed && (
+              <button
+                type="button"
+                onClick={() =>
+                  onDispatchAction({
+                    type: 'HOSTILE_TAKEOVER_CURRENT_TILE',
+                    playerId: effectivePlayerId,
+                  })
+                }
+                className="tactile-btn flex items-center justify-center gap-1 rounded-xl border-2 border-amber-300/80 bg-gradient-to-r from-[#7c2d12] via-[#b45309] to-[#7c2d12] px-3 py-2.5 text-xs font-extrabold text-white"
+              >
+                <Zap className="h-4 w-4 text-amber-200" />
+                <span>ซื้อฮุบ 2×</span>
               </button>
             )}
 
@@ -576,6 +633,23 @@ export default function App() {
     deck: 'chance' | 'chest';
     key: number;
   } | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  // Live elapsed in-game match timer
+  useEffect(() => {
+    if (!gameState || gameState.phase === 'LOBBY') {
+      setElapsedSeconds(0);
+      return;
+    }
+    const startTs = gameState.startedAt || Date.now();
+    const updateElapsed = () => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startTs) / 1000)));
+    };
+    updateElapsed();
+    if (gameState.phase === 'GAME_OVER') return;
+    const intervalId = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [gameState?.startedAt, gameState?.phase, Boolean(gameState)]);
 
   const prevPositionsRef = useRef<Record<string, number>>({});
   const lastLedgerSeqRef = useRef<number>(0);
@@ -596,6 +670,16 @@ export default function App() {
   const pendingWalkSoundsRef = useRef<Array<'cash' | 'card' | 'jail'>>([]);
   const pendingCardRevealRef = useRef<DrawnCardInfo | null>(null);
   const postCardAutoTileRef = useRef<number | null>(null);
+  const pendingPostCardMoveRef = useRef<{
+    playerId: string;
+    fromPos: number;
+    toPos: number;
+    movedInJail: boolean;
+    cardEffect: DrawnCardInfo['card']['effect'];
+    autoOpenTileIndex: number | null;
+    finalPositions: Record<string, number>;
+  } | null>(null);
+  const botCardAutoCloseTimerRef = useRef<number | null>(null);
   const turnOrderWinnerTimerRef = useRef<number | null>(null);
   const prevTurnPhaseRef = useRef<GameState['phase'] | undefined>(undefined);
 
@@ -679,6 +763,100 @@ export default function App() {
     [triggerCashDelta, triggerCashTransferFx, triggerJailBanner],
   );
 
+  const executePendingPostCardMove = useCallback(() => {
+    if (botCardAutoCloseTimerRef.current !== null) {
+      window.clearTimeout(botCardAutoCloseTimerRef.current);
+      botCardAutoCloseTimerRef.current = null;
+    }
+
+    const move = pendingPostCardMoveRef.current;
+    if (!move) {
+      if (postCardAutoTileRef.current !== null) {
+        const nextTile = postCardAutoTileRef.current;
+        postCardAutoTileRef.current = null;
+        setSelectedTileIndex(nextTile);
+      }
+      return;
+    }
+    pendingPostCardMoveRef.current = null;
+
+    if (hopTimerRef.current !== null) {
+      window.clearTimeout(hopTimerRef.current);
+      hopTimerRef.current = null;
+    }
+
+    setAnimatingPlayerId(move.playerId);
+
+    if (move.cardEffect.kind === 'MOVE_BACK') {
+      const totalSteps = Math.max(1, move.cardEffect.spaces);
+      let step = 0;
+      const runBackwardStep = () => {
+        step += 1;
+        const intermediate = (move.fromPos - step + 40) % 40;
+        soundFX.playPawnHop(step);
+        setHopSpotlightTile(intermediate);
+        setDisplayPositions((prev) => ({
+          ...prev,
+          [move.playerId]: intermediate,
+        }));
+
+        if (step < totalSteps) {
+          hopTimerRef.current = window.setTimeout(runBackwardStep, 420);
+        } else {
+          hopTimerRef.current = window.setTimeout(() => {
+            hopTimerRef.current = null;
+            setAnimatingPlayerId(null);
+            setHopSpotlightTile(null);
+            setDisplayPositions(move.finalPositions);
+            flushPostWalkEffects(move.autoOpenTileIndex);
+          }, 260);
+        }
+      };
+      hopTimerRef.current = window.setTimeout(runBackwardStep, 160);
+      return;
+    }
+
+    if (move.cardEffect.kind === 'MOVE_TO' && !move.movedInJail) {
+      const forwardDist = (move.toPos - move.fromPos + 40) % 40;
+      const totalSteps = Math.max(1, forwardDist);
+      const stepDelay = totalSteps <= 8 ? 360 : 140;
+      let step = 0;
+      const runForwardStep = () => {
+        step += 1;
+        const intermediate = (move.fromPos + step) % 40;
+        soundFX.playPawnHop(step);
+        setHopSpotlightTile(intermediate);
+        setDisplayPositions((prev) => ({
+          ...prev,
+          [move.playerId]: intermediate,
+        }));
+
+        if (step < totalSteps) {
+          hopTimerRef.current = window.setTimeout(runForwardStep, stepDelay);
+        } else {
+          hopTimerRef.current = window.setTimeout(() => {
+            hopTimerRef.current = null;
+            setAnimatingPlayerId(null);
+            setHopSpotlightTile(null);
+            setDisplayPositions(move.finalPositions);
+            flushPostWalkEffects(move.autoOpenTileIndex);
+          }, 260);
+        }
+      };
+      hopTimerRef.current = window.setTimeout(runForwardStep, 160);
+      return;
+    }
+
+    // GO_TO_JAIL or direct jump
+    hopTimerRef.current = window.setTimeout(() => {
+      hopTimerRef.current = null;
+      setAnimatingPlayerId(null);
+      setHopSpotlightTile(null);
+      setDisplayPositions(move.finalPositions);
+      flushPostWalkEffects(move.autoOpenTileIndex);
+    }, 280);
+  }, [flushPostWalkEffects]);
+
   useEffect(() => {
     document.title = 'ซุปเปอร์เศรษฐี No. 9028 — Super Millionaire';
   }, []);
@@ -694,13 +872,19 @@ export default function App() {
     }
   }, [gameState, inspectedPlayerId, myPlayerId]);
 
-  // Step-by-step pawn hop animation when player position updates
+  // Step-by-step pawn hop animation when player position updates (supports 2-stage Chance/Chest movement)
   useEffect(() => {
     if (!gameState) {
       if (hopTimerRef.current !== null) {
         window.clearTimeout(hopTimerRef.current);
         hopTimerRef.current = null;
       }
+      if (botCardAutoCloseTimerRef.current !== null) {
+        window.clearTimeout(botCardAutoCloseTimerRef.current);
+        botCardAutoCloseTimerRef.current = null;
+      }
+      pendingPostCardMoveRef.current = null;
+      lastCardKeyRef.current = null;
       prevPositionsRef.current = {};
       setDisplayPositions({});
       setAnimatingPlayerId(null);
@@ -715,8 +899,21 @@ export default function App() {
         initial[p.id] = p.position;
       }
       prevPositionsRef.current = initial;
+      const initDrawn = gameState.lastCardDrawn;
+      lastCardKeyRef.current = initDrawn
+        ? `${initDrawn.turnNumber}:${initDrawn.card.id}:${initDrawn.playerId}:${initDrawn.drawnAtTileIndex ?? ''}`
+        : '__NONE__';
       setDisplayPositions(initial);
       return;
+    }
+
+    const drawn = gameState.lastCardDrawn;
+    const drawnKey = drawn
+      ? `${drawn.turnNumber}:${drawn.card.id}:${drawn.playerId}:${drawn.drawnAtTileIndex ?? ''}`
+      : '__NONE__';
+    const isFreshCardDraw = Boolean(drawn && drawnKey !== lastCardKeyRef.current);
+    if (drawn) {
+      lastCardKeyRef.current = drawnKey;
     }
 
     let movedPlayerId: string | null = null;
@@ -735,6 +932,23 @@ export default function App() {
       }
     }
 
+    // Handle case where a player rolled onto a Chance/Chest tile and a MOVE_BACK card sent them back to fromPos
+    if (
+      !movedPlayerId &&
+      isFreshCardDraw &&
+      drawn &&
+      drawn.drawnAtTileIndex !== undefined
+    ) {
+      const cardPlayer = gameState.players.find((p) => p.id === drawn.playerId);
+      const prev = cardPlayer ? prevPositionsRef.current[cardPlayer.id] : undefined;
+      if (cardPlayer && prev !== undefined && prev !== drawn.drawnAtTileIndex) {
+        movedPlayerId = cardPlayer.id;
+        fromPos = prev;
+        toPos = cardPlayer.position;
+        movedInJail = cardPlayer.inJail;
+      }
+    }
+
     // Always keep prevPositionsRef synced for non-animating players
     const nextSnapshot: Record<string, number> = {};
     for (const p of gameState.players) {
@@ -743,7 +957,15 @@ export default function App() {
     prevPositionsRef.current = nextSnapshot;
 
     if (!movedPlayerId) {
-      if (hopTimerRef.current === null) {
+      if (isFreshCardDraw && drawn) {
+        if (hopTimerRef.current !== null) {
+          pendingCardRevealRef.current = drawn;
+        } else {
+          setActiveCardDraw({ deck: drawn.card.deck, key: Date.now() });
+          setRevealedCard(drawn);
+        }
+      }
+      if (hopTimerRef.current === null && pendingPostCardMoveRef.current === null) {
         setDisplayPositions(nextSnapshot);
       }
       return;
@@ -752,6 +974,118 @@ export default function App() {
     if (hopTimerRef.current !== null) {
       window.clearTimeout(hopTimerRef.current);
       hopTimerRef.current = null;
+    }
+    if (botCardAutoCloseTimerRef.current !== null) {
+      window.clearTimeout(botCardAutoCloseTimerRef.current);
+      botCardAutoCloseTimerRef.current = null;
+    }
+    pendingPostCardMoveRef.current = null;
+
+    const landedDeed = gameState.deeds[toPos];
+    const canActOnUnownedDeed = Boolean(
+      landedDeed && !landedDeed.ownerId && gameState.phase === 'AWAIT_DECISION',
+    );
+    const canActOnOwnDeed = Boolean(
+      myPlayerId &&
+        landedDeed?.ownerId === myPlayerId &&
+        (canBuildOnCurrentTile(gameState, myPlayerId).allowed ||
+          canUnmortgageCurrentTile(gameState, myPlayerId).allowed),
+    );
+    const canActOnOpponentDeed = Boolean(
+      myPlayerId &&
+        landedDeed?.ownerId &&
+        landedDeed.ownerId !== myPlayerId &&
+        canHostileTakeoverCurrentTile(gameState, myPlayerId).allowed,
+    );
+
+    const shouldAutoOpenTileModal = Boolean(
+      !movedInJail &&
+        myPlayerId &&
+        !isSpectator &&
+        movedPlayerId === myPlayerId &&
+        landedDeed &&
+        !gameState.players.find((p) => p.id === movedPlayerId)?.isBankrupt &&
+        (canActOnUnownedDeed || canActOnOwnDeed || canActOnOpponentDeed),
+    );
+
+    // Check if the player first landed on a Chance/Chest tile (drawnAtTileIndex) before being moved by a card
+    const intermediateCardTile =
+      isFreshCardDraw &&
+      drawn &&
+      drawn.playerId === movedPlayerId &&
+      drawn.drawnAtTileIndex !== undefined &&
+      drawn.drawnAtTileIndex !== toPos
+        ? drawn.drawnAtTileIndex
+        : null;
+
+    if (isFreshCardDraw && drawn && intermediateCardTile === null) {
+      pendingCardRevealRef.current = drawn;
+    }
+
+    const latestRoll = [...gameState.banker.ledger]
+      .reverse()
+      .find((e) => e.type === 'DICE_ROLL');
+    const isFreshDiceMove = Boolean(
+      latestRoll && latestRoll.seq > lastDiceRollSeqRef.current,
+    );
+    const initialDelay = isFreshDiceMove ? 560 : 140;
+
+    if (intermediateCardTile !== null && drawn) {
+      // 2-Stage Movement:
+      // Stage 1: Walk forward from fromPos to intermediateCardTile (the Chance/Chest tile)
+      // Stage 2: Reveal the drawn card on intermediateCardTile, then walk backward/forward to toPos
+      const stage1Steps = Math.max(1, (intermediateCardTile - fromPos + 40) % 40);
+      let step = 0;
+      setAnimatingPlayerId(movedPlayerId);
+
+      const runStage1Step = () => {
+        step += 1;
+        const intermediate = (fromPos + step) % 40;
+        soundFX.playPawnHop(step);
+        setHopSpotlightTile(intermediate);
+        setDisplayPositions((prev) => ({
+          ...prev,
+          [movedPlayerId!]: intermediate,
+        }));
+
+        if (step < stage1Steps) {
+          hopTimerRef.current = window.setTimeout(runStage1Step, 440);
+        } else {
+          hopTimerRef.current = window.setTimeout(() => {
+            hopTimerRef.current = null;
+            // Remove 'card' from pendingWalkSoundsRef since we play it right as the card opens
+            pendingWalkSoundsRef.current = pendingWalkSoundsRef.current.filter(
+              (s) => s !== 'card',
+            );
+            soundFX.playCardFlip();
+
+            pendingPostCardMoveRef.current = {
+              playerId: movedPlayerId!,
+              fromPos: intermediateCardTile,
+              toPos,
+              movedInJail,
+              cardEffect: drawn.card.effect,
+              autoOpenTileIndex: shouldAutoOpenTileModal ? toPos : null,
+              finalPositions: nextSnapshot,
+            };
+
+            setActiveCardDraw({ deck: drawn.card.deck, key: Date.now() });
+            setRevealedCard(drawn);
+
+            const cardActor = gameState.players.find((p) => p.id === movedPlayerId);
+            if (cardActor?.kind === 'bot' || isSpectator) {
+              botCardAutoCloseTimerRef.current = window.setTimeout(() => {
+                botCardAutoCloseTimerRef.current = null;
+                setRevealedCard(null);
+                executePendingPostCardMove();
+              }, 1450);
+            }
+          }, 260);
+        }
+      };
+
+      hopTimerRef.current = window.setTimeout(runStage1Step, initialDelay);
+      return;
     }
 
     const forwardDist = (toPos - fromPos + 40) % 40;
@@ -766,15 +1100,6 @@ export default function App() {
     const isShortForward =
       (!movedInJail && forwardDist >= 1 && forwardDist <= 12) || wentViaGoToJail;
     const isShortBackward = !movedInJail && backwardDist >= 1 && backwardDist <= 3;
-
-    const shouldAutoOpenTileModal = Boolean(
-      !movedInJail &&
-        myPlayerId &&
-        !isSpectator &&
-        movedPlayerId === myPlayerId &&
-        gameState.deeds[toPos] &&
-        !gameState.players.find((p) => p.id === movedPlayerId)?.isBankrupt,
-    );
 
     if (!isShortForward && !isShortBackward) {
       setDisplayPositions(nextSnapshot);
@@ -795,15 +1120,6 @@ export default function App() {
     let step = 0;
 
     setAnimatingPlayerId(movedPlayerId);
-
-    // Check if this update also contains a fresh dice roll so hops start cleanly after dice tumble
-    const latestRoll = [...gameState.banker.ledger]
-      .reverse()
-      .find((e) => e.type === 'DICE_ROLL');
-    const isFreshDiceMove = Boolean(
-      latestRoll && latestRoll.seq > lastDiceRollSeqRef.current,
-    );
-    const initialDelay = isFreshDiceMove ? 560 : 140;
 
     const runStep = () => {
       step += 1;
@@ -832,7 +1148,7 @@ export default function App() {
     };
 
     hopTimerRef.current = window.setTimeout(runStep, initialDelay);
-  }, [gameState, myPlayerId, isSpectator, flushPostWalkEffects]);
+  }, [gameState, myPlayerId, isSpectator, flushPostWalkEffects, executePendingPostCardMove]);
 
   // Cleanup dice, hop & FX timers on unmount
   useEffect(() => {
@@ -965,6 +1281,7 @@ export default function App() {
           break;
         }
         case 'RENT':
+        case 'TAKEOVER':
         case 'TAX':
         case 'PASS_START': {
           if (isWalkInProgress) {
@@ -982,7 +1299,7 @@ export default function App() {
               : undefined;
 
             const fx: CashTransferFx =
-              entry.type === 'RENT'
+              entry.type === 'RENT' || entry.type === 'TAKEOVER'
                 ? {
                     key: entry.seq,
                     kind: 'RENT',
@@ -991,7 +1308,10 @@ export default function App() {
                     recipientId: target?.id,
                     payerTileIndex: entry.tileIndex ?? actor?.position,
                     recipientTileIndex: target?.position,
-                    message: `💸 ${actor?.name ?? 'ผู้เล่น'} จ่ายค่าเช่า -฿${formatBahtNumber(entry.amount)} → ${target?.name ?? 'เจ้าของโฉนด'}`,
+                    message:
+                      entry.type === 'TAKEOVER'
+                        ? `⚡ ${actor?.name ?? 'ผู้เล่น'} ซื้อฮุบโฉนด 2× -฿${formatBahtNumber(entry.amount)} → ${target?.name ?? 'เจ้าของเดิม'}`
+                        : `💸 ${actor?.name ?? 'ผู้เล่น'} จ่ายค่าเช่า -฿${formatBahtNumber(entry.amount)} → ${target?.name ?? 'เจ้าของโฉนด'}`,
                   }
                 : entry.type === 'TAX'
                   ? {
@@ -1019,7 +1339,7 @@ export default function App() {
 
             if (myPlayerId && !isSpectator) {
               let deltaForMe = 0;
-              if (entry.type === 'RENT') {
+              if (entry.type === 'RENT' || entry.type === 'TAKEOVER') {
                 if (entry.actorId === myPlayerId) deltaForMe = -entry.amount;
                 else if (entry.targetId === myPlayerId) deltaForMe = entry.amount;
               } else if (entry.type === 'TAX' && entry.actorId === myPlayerId) {
@@ -1075,30 +1395,6 @@ export default function App() {
       }
     }
   }, [gameState, myPlayerId, isSpectator, triggerCashDelta, triggerCashTransferFx]);
-
-  // Trigger CardRevealModal when a new card is drawn (deferred until walk reaches deck tile)
-  useEffect(() => {
-    const drawn = gameState?.lastCardDrawn;
-    if (!drawn) {
-      lastCardKeyRef.current = null;
-      return;
-    }
-    const key = `${drawn.turnNumber}:${drawn.card.id}:${drawn.playerId}`;
-    if (lastCardKeyRef.current === null) {
-      // Avoid popping stale card immediately on initial reconnect unless turn just happened
-      lastCardKeyRef.current = key;
-      return;
-    }
-    if (lastCardKeyRef.current !== key) {
-      lastCardKeyRef.current = key;
-      if (hopTimerRef.current !== null) {
-        pendingCardRevealRef.current = drawn;
-      } else {
-        setActiveCardDraw({ deck: drawn.card.deck, key: Date.now() });
-        setRevealedCard(drawn);
-      }
-    }
-  }, [gameState?.lastCardDrawn]);
 
   const handleToggleMute = () => {
     setMuted(soundFX.toggleMute());
@@ -1205,6 +1501,14 @@ export default function App() {
                 </span>
                 <span className="mono-num rounded-md border border-amber-400/50 bg-gradient-to-b from-amber-400/20 to-amber-600/10 px-2 py-0.5 text-xs font-extrabold tracking-wider text-amber-200 shadow-inner">
                   {roomState.roomId}
+                </span>
+                {/* Live Elapsed Match Time Counter */}
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-amber-400/35 bg-stone-950/85 px-2.5 py-0.5 text-[11px] font-bold text-amber-100 shadow-inner"
+                  title="เวลาที่เล่นในตานี้"
+                >
+                  <Clock className="h-3 w-3 text-amber-300" />
+                  <span className="mono-num">{formatElapsedDuration(elapsedSeconds)}</span>
                 </span>
                 {isLocalOffline && (
                   <span className="hidden rounded-full border border-emerald-400/40 bg-emerald-950/70 px-2 py-0.5 text-[10px] font-bold text-emerald-200 sm:inline-block">
@@ -1712,11 +2016,7 @@ export default function App() {
             }
             onClose={() => {
               setRevealedCard(null);
-              if (postCardAutoTileRef.current !== null) {
-                const nextTile = postCardAutoTileRef.current;
-                postCardAutoTileRef.current = null;
-                setSelectedTileIndex(nextTile);
-              }
+              executePendingPostCardMove();
             }}
           />
 

@@ -1,13 +1,17 @@
 import Peer, { util as peerUtil, type DataConnection } from 'peerjs';
 import {
   BOT_DEFAULT_NAMES,
+  DEFAULT_BOARD_MAP_THEME,
   PLAYER_COLORS,
+  TOKEN_NAMES,
   applyGameAction,
   createGameState,
   decideNextBotAction,
   evaluateTradeOffer,
   getCurrentPlayer,
   getRecommendedBotActionDelayMs,
+  normalizeGameRules,
+  type BoardMapTheme,
   type BotStyle,
   type GameAction,
   type LedgerEntry,
@@ -22,12 +26,58 @@ import {
 const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const PEER_PREFIX = 'sm9028-';
 
+function getCustomIceServers(): RTCIceServer[] {
+  try {
+    const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+    const rawJson = env?.VITE_ICE_SERVERS_JSON?.trim();
+    if (rawJson) {
+      const parsed = JSON.parse(rawJson) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed as RTCIceServer[];
+      }
+    }
+    const turnUrl = env?.VITE_TURN_URL?.trim();
+    if (turnUrl) {
+      const urls = turnUrl
+        .split(',')
+        .map((u) => u.trim())
+        .filter(Boolean);
+      return [
+        {
+          urls,
+          username: env?.VITE_TURN_USERNAME?.trim(),
+          credential: env?.VITE_TURN_CREDENTIAL?.trim(),
+        },
+      ];
+    }
+  } catch {
+    // Ignore env parse errors and fall back to default STUN/TURN servers
+  }
+  return [];
+}
+
 const PEER_ICE_CONFIG: RTCConfiguration = {
+  iceCandidatePoolSize: 10,
   iceServers: [
     ...(peerUtil.defaultConfig?.iceServers ?? []),
+    { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
+    // Public TURN relays (UDP 80, TCP 80/443, TLS 443) for CGNAT / mobile 4G-5G / strict firewalls
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:80?transport=tcp',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp',
+        'turns:openrelay.metered.ca:443?transport=tcp',
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    ...getCustomIceServers(),
   ],
 };
 
@@ -50,6 +100,26 @@ function normalizeStyle(style: unknown): BotStyle {
   return 'balanced';
 }
 
+function normalizeTokenId(tokenId: unknown, fallbackIndex: number): number {
+  const count = TOKEN_NAMES.length;
+  if (typeof tokenId === 'number' && Number.isFinite(tokenId)) {
+    return ((Math.trunc(tokenId) % count) + count) % count;
+  }
+  return ((fallbackIndex % count) + count) % count;
+}
+
+function normalizeMapTheme(theme: unknown): BoardMapTheme {
+  if (
+    theme === 'siam_park' ||
+    theme === 'bangkok_metro' ||
+    theme === 'tropical_island' ||
+    theme === 'royal_palace'
+  ) {
+    return theme;
+  }
+  return DEFAULT_BOARD_MAP_THEME;
+}
+
 export type PeerClientToHostMsg =
   | {
       type: 'join';
@@ -57,6 +127,7 @@ export type PeerClientToHostMsg =
       sessionToken: string;
       playerName: string;
       preferredSeatIndex?: number;
+      preferredTokenId?: number;
       asSpectator?: boolean;
     }
   | {
@@ -110,6 +181,9 @@ export class PeerRoomHost {
   private readonly connQueues = new WeakMap<DataConnection, PeerHostToClientMsg[]>();
   private readonly callbacks: HostTransportCallbacks;
   private botTimer: number | null = null;
+  private keepAliveTimer: number | null = null;
+  private reconnectingSignaling = false;
+  private cleanupWindowListeners: (() => void) | null = null;
   private destroyed = false;
 
   private constructor(
@@ -126,6 +200,7 @@ export class PeerRoomHost {
     sessionToken: string;
     playerName: string;
     config?: Partial<RoomConfig>;
+    preferredRoomId?: string;
     callbacks: HostTransportCallbacks;
   }): Promise<{ host: PeerRoomHost; ack: RoomJoinAck }> {
     const totalSeats = isValidSeatCount(params.config?.totalSeats) ? params.config.totalSeats : 4;
@@ -138,15 +213,18 @@ export class PeerRoomHost {
 
     const slots: PlayerSlotConfig[] = [];
     const seats: RoomSeat[] = [];
+    const mapTheme = normalizeMapTheme(params.config?.mapTheme);
     for (let i = 0; i < totalSeats; i++) {
       const raw = rawSlotMap.get(i);
       const kind = raw?.kind === 'bot' ? 'bot' : 'human';
       const botStyle = normalizeStyle(raw?.botStyle);
+      const tokenId = normalizeTokenId(raw?.tokenId, i);
       slots.push({
         seatIndex: i,
         kind,
         name: kind === 'bot' ? raw?.name?.trim() || BOT_DEFAULT_NAMES[i % BOT_DEFAULT_NAMES.length] : undefined,
         botStyle: kind === 'bot' ? botStyle : undefined,
+        tokenId,
       });
       seats.push({
         seatIndex: i,
@@ -156,7 +234,7 @@ export class PeerRoomHost {
         occupiedBySocketId: null,
         playerId: `player-${i + 1}`,
         ready: kind === 'bot',
-        tokenId: i,
+        tokenId,
         color: PLAYER_COLORS[i % PLAYER_COLORS.length]!,
       });
     }
@@ -165,11 +243,20 @@ export class PeerRoomHost {
     const firstHumanIdx = slots.findIndex((s) => s.kind === 'human');
     const hostSeatIndex = firstHumanIdx >= 0 ? firstHumanIdx : 0;
 
-    // Try up to 3 fresh room codes in case one collides on PeerJS signaling server
+    const preferredClean = params.preferredRoomId
+      ?.trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+      .slice(0, 8);
+
+    // Try up to 4 room codes in case one collides on PeerJS signaling server
     let openedPeer: Peer | null = null;
     let roomId = '';
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const candidate = generateRoomCode();
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const candidate =
+        attempt === 0 && preferredClean && preferredClean.length >= 4
+          ? preferredClean
+          : generateRoomCode();
       try {
         openedPeer = await new Promise<Peer>((resolve, reject) => {
           const p = new Peer(`${PEER_PREFIX}${candidate}`, {
@@ -179,7 +266,7 @@ export class PeerRoomHost {
           const timeout = window.setTimeout(() => {
             p.destroy();
             reject(new Error('หมดเวลาการเชื่อมต่อระบบห้องออนไลน์'));
-          }, 8000);
+          }, 9000);
           p.once('open', () => {
             window.clearTimeout(timeout);
             resolve(p);
@@ -193,7 +280,7 @@ export class PeerRoomHost {
         roomId = candidate;
         break;
       } catch (err) {
-        if (attempt === 2) {
+        if (attempt === 3) {
           return {
             host: null as unknown as PeerRoomHost,
             ack: {
@@ -225,7 +312,12 @@ export class PeerRoomHost {
     const room: RoomState = {
       roomId,
       hostSeatIndex,
-      config: { totalSeats, slots },
+      config: {
+        totalSeats,
+        mapTheme,
+        rules: normalizeGameRules(params.config?.rules),
+        slots,
+      },
       seats,
       status: 'LOBBY',
       gameState: null,
@@ -237,6 +329,7 @@ export class PeerRoomHost {
       host.seatTokens.set(firstHumanIdx, params.sessionToken);
     }
     host.attachPeer(openedPeer);
+    host.startSignalingKeepAlive();
     params.callbacks.onRoomChange(room);
 
     return {
@@ -270,6 +363,67 @@ export class PeerRoomHost {
         conn.send(msg);
       }
     }
+  }
+
+  private startSignalingKeepAlive(): void {
+    if (typeof window === 'undefined') return;
+    const onResume = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      this.ensureSignalingConnected();
+    };
+    window.addEventListener('visibilitychange', onResume);
+    window.addEventListener('online', onResume);
+    window.addEventListener('focus', onResume);
+    this.cleanupWindowListeners = () => {
+      window.removeEventListener('visibilitychange', onResume);
+      window.removeEventListener('online', onResume);
+      window.removeEventListener('focus', onResume);
+    };
+    this.keepAliveTimer = window.setInterval(() => {
+      this.ensureSignalingConnected();
+    }, 4000);
+  }
+
+  private ensureSignalingConnected(): void {
+    if (this.destroyed || this.reconnectingSignaling) return;
+    const currentPeer = this.peer;
+    if (currentPeer && !currentPeer.destroyed) {
+      if (currentPeer.disconnected) {
+        try {
+          currentPeer.reconnect();
+        } catch {
+          // Will recreate on next check if peer becomes destroyed
+        }
+      }
+      return;
+    }
+
+    // Peer instance was destroyed by a network drop; re-register the same room ID on signaling server
+    this.reconnectingSignaling = true;
+    const replacement = new Peer(`${PEER_PREFIX}${this.room.roomId}`, {
+      debug: 0,
+      config: PEER_ICE_CONFIG,
+    });
+    const giveUpTimer = window.setTimeout(() => {
+      this.reconnectingSignaling = false;
+      if (!replacement.open) {
+        replacement.destroy();
+      }
+    }, 8000);
+    replacement.once('open', () => {
+      window.clearTimeout(giveUpTimer);
+      this.reconnectingSignaling = false;
+      if (this.destroyed) {
+        replacement.destroy();
+        return;
+      }
+      this.attachPeer(replacement);
+    });
+    replacement.once('error', () => {
+      window.clearTimeout(giveUpTimer);
+      this.reconnectingSignaling = false;
+      replacement.destroy();
+    });
   }
 
   private attachPeer(peer: Peer): void {
@@ -308,15 +462,25 @@ export class PeerRoomHost {
         try {
           peer.reconnect();
         } catch {
-          // Ignore transient signaling reconnect errors
+          // Ignore transient signaling reconnect errors; keep-alive will retry
         }
       }
     });
 
     peer.on('error', (err) => {
-      if (!this.destroyed) {
-        this.callbacks.onError(`การเชื่อมต่อ P2P ขัดข้อง: ${err.message}`);
+      if (this.destroyed) return;
+      const errType = (err as { type?: string })?.type ?? '';
+      if (
+        errType === 'network' ||
+        errType === 'disconnected' ||
+        errType === 'server-error' ||
+        errType === 'socket-error' ||
+        errType === 'socket-closed'
+      ) {
+        window.setTimeout(() => this.ensureSignalingConnected(), 1000);
+        return;
       }
+      this.callbacks.onError(`การเชื่อมต่อ P2P ขัดข้อง: ${err.message}`);
     });
   }
 
@@ -406,6 +570,7 @@ export class PeerRoomHost {
     sessionToken: string;
     playerName: string;
     preferredSeatIndex?: number;
+    preferredTokenId?: number;
     asSpectator?: boolean;
   }): RoomJoinAck {
     const cleanName = params.playerName.trim().slice(0, 32) || 'ผู้เล่น';
@@ -413,6 +578,9 @@ export class PeerRoomHost {
     const hasPreferredSeat =
       typeof params.preferredSeatIndex === 'number' &&
       Number.isInteger(params.preferredSeatIndex);
+    const hasPreferredToken =
+      typeof params.preferredTokenId === 'number' &&
+      Number.isFinite(params.preferredTokenId);
 
     // Reconnect by token
     for (let i = 0; i < this.room.seats.length; i++) {
@@ -428,7 +596,15 @@ export class PeerRoomHost {
           ...this.room,
           seats: this.room.seats.map((s, idx) =>
             idx === i
-              ? { ...s, occupiedBySocketId: socketId, name: cleanName || s.name }
+              ? {
+                  ...s,
+                  occupiedBySocketId: socketId,
+                  name: cleanName || s.name,
+                  tokenId:
+                    this.room.status === 'LOBBY' && hasPreferredToken
+                      ? normalizeTokenId(params.preferredTokenId, s.tokenId)
+                      : s.tokenId,
+                }
               : s,
           ),
           gameState: this.room.gameState
@@ -484,8 +660,10 @@ export class PeerRoomHost {
 
     // Clear previous seat if switching inside lobby
     const clearedIndices = new Set<number>();
+    let previousTokenId: number | undefined;
     for (let i = 0; i < this.room.seats.length; i++) {
       if (this.seatTokens.get(i) === params.sessionToken) {
+        previousTokenId = this.room.seats[i]?.tokenId;
         this.seatTokens.delete(i);
         clearedIndices.add(i);
       }
@@ -501,10 +679,16 @@ export class PeerRoomHost {
       ...this.room,
       seats: this.room.seats.map((s, idx) => {
         if (idx === targetIndex) {
+          const nextTokenId = hasPreferredToken
+            ? normalizeTokenId(params.preferredTokenId, s.tokenId)
+            : previousTokenId !== undefined
+              ? previousTokenId
+              : s.tokenId;
           return {
             ...s,
             occupiedBySocketId: assignedSocketId,
             name: cleanName,
+            tokenId: nextTokenId,
             ready: idx === this.room.hostSeatIndex,
           };
         }
@@ -561,6 +745,7 @@ export class PeerRoomHost {
       const kind = slot?.kind ?? (i === 0 ? 'human' : 'bot');
       const botStyle = normalizeStyle(slot?.botStyle);
       const defaultBotName = BOT_DEFAULT_NAMES[i % BOT_DEFAULT_NAMES.length]!;
+      const tokenId = normalizeTokenId(slot?.tokenId ?? prev?.tokenId, i);
       const slotName =
         kind === 'bot'
           ? slot?.name?.trim() || defaultBotName
@@ -573,6 +758,7 @@ export class PeerRoomHost {
         kind,
         name: kind === 'bot' ? slotName : undefined,
         botStyle: kind === 'bot' ? botStyle : undefined,
+        tokenId,
       });
 
       const keepOccupied = kind === 'human' && prev?.kind === 'human' ? prev.occupiedBySocketId : null;
@@ -588,7 +774,7 @@ export class PeerRoomHost {
         occupiedBySocketId: keepOccupied,
         playerId: `player-${i + 1}`,
         ready: kind === 'bot' ? true : Boolean(keepOccupied && i === this.room.hostSeatIndex ? true : prev?.ready),
-        tokenId: i,
+        tokenId,
         color: PLAYER_COLORS[i % PLAYER_COLORS.length]!,
       });
     }
@@ -600,9 +786,11 @@ export class PeerRoomHost {
       }
     }
 
+    const mapTheme = normalizeMapTheme(config.mapTheme ?? this.room.config.mapTheme);
+    const rules = normalizeGameRules(config.rules ?? this.room.config.rules);
     this.room = {
       ...this.room,
-      config: { totalSeats, slots: nextSlots },
+      config: { totalSeats, mapTheme, rules, slots: nextSlots },
       seats: nextSeats,
     };
     this.broadcastState();
@@ -630,6 +818,7 @@ export class PeerRoomHost {
           kind: 'bot',
           name: BOT_DEFAULT_NAMES[s.seatIndex % BOT_DEFAULT_NAMES.length],
           botStyle: 'balanced',
+          tokenId: s.tokenId,
         };
       }
       return {
@@ -637,11 +826,13 @@ export class PeerRoomHost {
         kind: s.kind,
         name: s.kind === 'human' ? s.name : this.room.config.slots[s.seatIndex]?.name,
         botStyle: s.botStyle,
+        tokenId: s.tokenId,
       };
     });
 
     const gs = createGameState(this.room.roomId, {
       totalSeats: this.room.config.totalSeats,
+      mapTheme: this.room.config.mapTheme ?? DEFAULT_BOARD_MAP_THEME,
       slots: finalSlots,
     });
 
@@ -815,6 +1006,14 @@ export class PeerRoomHost {
       window.clearTimeout(this.botTimer);
       this.botTimer = null;
     }
+    if (this.keepAliveTimer !== null) {
+      window.clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
+    if (this.cleanupWindowListeners) {
+      this.cleanupWindowListeners();
+      this.cleanupWindowListeners = null;
+    }
     for (const conn of this.connections) {
       conn.close();
     }
@@ -878,72 +1077,102 @@ export class PeerRoomClient {
     sessionToken: string;
     playerName: string;
     preferredSeatIndex?: number;
+    preferredTokenId?: number;
     asSpectator?: boolean;
     callbacks: GuestCallbacks;
   }): Promise<{ client?: PeerRoomClient; ack: RoomJoinAck }> {
     const normalized = params.roomId.trim().toUpperCase();
-    try {
-      const peer = await new Promise<Peer>((resolve, reject) => {
-        const p = new Peer({ debug: 0, config: PEER_ICE_CONFIG });
-        const timeout = window.setTimeout(() => {
-          p.destroy();
-          reject(new Error('หมดเวลาเชื่อมต่อสัญญาณห้อง P2P'));
-        }, 12000);
-        p.once('open', () => {
-          window.clearTimeout(timeout);
-          resolve(p);
-        });
-        p.once('error', (err) => {
-          window.clearTimeout(timeout);
-          p.destroy();
-          reject(err);
-        });
-      });
+    const maxAttempts = 4;
+    let lastError: unknown = null;
 
-      const conn = await new Promise<DataConnection>((resolve, reject) => {
-        // Use JSON serialization so optional undefined fields (e.g. preferredSeatIndex) stay omitted rather than coerced to null
-        const c = peer.connect(`${PEER_PREFIX}${normalized}`, {
-          reliable: true,
-          serialization: 'json',
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      let peer: Peer | null = null;
+      try {
+        peer = await new Promise<Peer>((resolve, reject) => {
+          const p = new Peer({ debug: 0, config: PEER_ICE_CONFIG });
+          const timeout = window.setTimeout(() => {
+            p.destroy();
+            reject(new Error('หมดเวลาเชื่อมต่อสัญญาณห้อง P2P'));
+          }, 9000);
+          p.once('open', () => {
+            window.clearTimeout(timeout);
+            resolve(p);
+          });
+          p.once('error', (err) => {
+            window.clearTimeout(timeout);
+            p.destroy();
+            reject(err);
+          });
         });
-        const timeout = window.setTimeout(() => {
-          c.close();
-          peer.destroy();
-          reject(new Error(`ไม่พบห้อง ${normalized} หรือเจ้าบ้านปิดห้องแล้ว`));
-        }, 12000);
-        c.once('open', () => {
-          window.clearTimeout(timeout);
-          resolve(c);
-        });
-        c.once('error', (err) => {
-          window.clearTimeout(timeout);
-          peer.destroy();
-          reject(err);
-        });
-      });
 
-      const client = new PeerRoomClient(peer, conn, params.sessionToken, params.callbacks);
-      const ack = await client.sendJoin({
-        playerName: params.playerName,
-        preferredSeatIndex: params.preferredSeatIndex,
-        asSpectator: params.asSpectator,
-      });
-      if (!ack.ok) {
-        client.destroy();
-        return { ack };
+        const activePeer = peer;
+        const conn = await new Promise<DataConnection>((resolve, reject) => {
+          // Use JSON serialization so optional undefined fields (e.g. preferredSeatIndex) stay omitted rather than coerced to null
+          const c = activePeer.connect(`${PEER_PREFIX}${normalized}`, {
+            reliable: true,
+            serialization: 'json',
+          });
+          const cleanupPeerListener = () => {
+            activePeer.off('error', onPeerError);
+          };
+          const timeout = window.setTimeout(() => {
+            cleanupPeerListener();
+            c.close();
+            reject(new Error(`ไม่พบห้อง ${normalized} หรือเจ้าบ้านปิดห้องแล้ว`));
+          }, 8500);
+          const onPeerError = (err: Error & { type?: string }) => {
+            window.clearTimeout(timeout);
+            cleanupPeerListener();
+            c.close();
+            if (err?.type === 'peer-unavailable') {
+              reject(new Error(`ไม่พบห้อง ${normalized} หรือเจ้าบ้านยังไม่ได้อยู่ในหน้าห้อง`));
+            } else {
+              reject(err);
+            }
+          };
+          activePeer.on('error', onPeerError);
+          c.once('open', () => {
+            window.clearTimeout(timeout);
+            cleanupPeerListener();
+            resolve(c);
+          });
+          c.once('error', (err) => {
+            window.clearTimeout(timeout);
+            cleanupPeerListener();
+            reject(err);
+          });
+        });
+
+        const client = new PeerRoomClient(activePeer, conn, params.sessionToken, params.callbacks);
+        const ack = await client.sendJoin({
+          playerName: params.playerName,
+          preferredSeatIndex: params.preferredSeatIndex,
+          preferredTokenId: params.preferredTokenId,
+          asSpectator: params.asSpectator,
+        });
+        if (!ack.ok) {
+          client.destroy();
+          return { ack };
+        }
+        return { client, ack };
+      } catch (err) {
+        lastError = err;
+        peer?.destroy();
+        if (attempt < maxAttempts - 1) {
+          await new Promise<void>((r) => window.setTimeout(r, 1400));
+        }
       }
-      return { client, ack };
-    } catch (err) {
-      return {
-        ack: {
-          ok: false,
-          error:
-            err instanceof Error
-              ? err.message
-              : `ไม่พบห้อง ${normalized} หรือไม่สามารถเชื่อมต่อกับเจ้าบ้านได้`,
-        },
-      };
     }
+
+    return {
+      ack: {
+        ok: false,
+        error:
+          lastError instanceof Error
+            ? lastError.message
+            : `ไม่พบห้อง ${normalized} หรือไม่สามารถเชื่อมต่อกับเจ้าบ้านได้`,
+      },
+    };
   }
 
   private nextReqId(): string {
@@ -954,6 +1183,7 @@ export class PeerRoomClient {
   sendJoin(params: {
     playerName: string;
     preferredSeatIndex?: number;
+    preferredTokenId?: number;
     asSpectator?: boolean;
   }): Promise<RoomJoinAck> {
     const reqId = this.nextReqId();
@@ -973,6 +1203,9 @@ export class PeerRoomClient {
         playerName: params.playerName,
         ...(typeof params.preferredSeatIndex === 'number'
           ? { preferredSeatIndex: params.preferredSeatIndex }
+          : {}),
+        ...(typeof params.preferredTokenId === 'number'
+          ? { preferredTokenId: params.preferredTokenId }
           : {}),
         ...(params.asSpectator ? { asSpectator: true } : {}),
       };

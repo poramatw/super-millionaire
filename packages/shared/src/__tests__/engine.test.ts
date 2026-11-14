@@ -778,4 +778,107 @@ describe('all-bot automated simulation sanity check', () => {
     // Deck automatically reshuffled for the next cycle (23 if chance-8 Jail-Free card is held, else 24)
     expect(state.chanceDeck.length).toBeGreaterThanOrEqual(23);
   });
+
+  it('records drawnAtTileIndex on MOVE_BACK Chance card from tile 22 to tile 20 and supports powerRange dice rolls', () => {
+    let state = createStartedGameState('room-card-move', twoPlayerConfig(), 99);
+    state = {
+      ...state,
+      chanceDeck: ['chance-24'], // เปลี่ยนใจเลี้ยวรถกลับ — ถอยหลังกลับไป 2 ช่อง
+      players: state.players.map((p, i) => (i === 0 ? { ...p, position: 16 } : p)),
+    };
+
+    const res = rollDice(state, 'player-1', [2, 4]); // 16 + 6 = 22 (ประตูดวง) -> MOVE_BACK 2 -> 20 (แวะพักผ่อนคนจน)
+    expect(res.ok).toBe(true);
+    expect(res.state.lastCardDrawn?.card.id).toBe('chance-24');
+    expect(res.state.lastCardDrawn?.drawnAtTileIndex).toBe(22);
+    expect(res.state.players[0]?.position).toBe(20);
+
+    // Verify powerRange ('high') biases dice rolls toward 9..12 while keeping valid 1..6 dice faces
+    const rng = createSeededRng(1234);
+    let highHits = 0;
+    const trials = 60;
+    for (let i = 0; i < trials; i++) {
+      const fresh = createStartedGameState(`room-power-${i}`, twoPlayerConfig(), i + 1);
+      const act = applyGameAction(
+        fresh,
+        { type: 'ROLL_DICE', playerId: 'player-1', powerRange: 'high' },
+        rng,
+      );
+      expect(act.ok).toBe(true);
+      const dice = act.state.lastDice!;
+      expect(dice.die1).toBeGreaterThanOrEqual(1);
+      expect(dice.die1).toBeLessThanOrEqual(6);
+      expect(dice.die2).toBeGreaterThanOrEqual(1);
+      expect(dice.die2).toBeLessThanOrEqual(6);
+      expect(dice.powerRange).toBe('high');
+      if (dice.total >= 9 && dice.total <= 12) {
+        highHits += 1;
+      }
+    }
+    expect(highHits).toBeGreaterThan(30);
+  });
+
+  it('supports hostileTakeover (2x buyout), monopolyVictory (3 color sets), escalatingRent, and maxRounds victory', () => {
+    let state = createStartedGameState('room-rules', twoPlayerConfig(), 555);
+
+    // 1. Hostile Takeover: player-2 owns tile 1 (สนามหลวง, price 600), player-1 lands on tile 1 and buys it over for 1,200
+    state = {
+      ...state,
+      phase: 'ACTION_PHASE',
+      hasRolledThisTurn: true,
+      deeds: {
+        ...state.deeds,
+        1: { ...state.deeds[1]!, ownerId: 'player-2', houses: 0, hasHotel: false },
+      },
+      players: state.players.map((p, idx) =>
+        idx === 0 ? { ...p, position: 1, cash: 15000 } : { ...p, cash: 15000 },
+      ),
+    };
+
+    const takeoverRes = applyGameAction(state, {
+      type: 'HOSTILE_TAKEOVER_CURRENT_TILE',
+      playerId: 'player-1',
+    });
+    expect(takeoverRes.ok).toBe(true);
+    expect(takeoverRes.state.deeds[1]?.ownerId).toBe('player-1');
+    expect(takeoverRes.state.players[0]?.cash).toBe(15000 - 1200);
+    expect(takeoverRes.state.players[1]?.cash).toBe(15000 + 1200);
+
+    // 2. Escalating Rent: at round 15 (turnNumber = 29 for 2 players), rent is multiplied by 1.5x
+    const inflatedState = {
+      ...takeoverRes.state,
+      turnNumber: 30, // Round 15
+    };
+    const baseRent = calculateRent({ ...takeoverRes.state, turnNumber: 1 }, 1, 7);
+    const round15Rent = calculateRent(inflatedState, 1, 7);
+    expect(round15Rent).toBe(Math.round(baseRent * 1.5));
+
+    // 3. Monopoly Victory: owning 3 complete color groups (brown: 1,3; lightBlue: 6,8,9; darkRed: 37,39) wins immediately
+    let preMonopoly = {
+      ...takeoverRes.state,
+      phase: 'AWAIT_DECISION' as const,
+      pendingDecisionTileIndex: 39,
+      deeds: {
+        ...takeoverRes.state.deeds,
+        1: { ...takeoverRes.state.deeds[1]!, ownerId: 'player-1' },
+        3: { ...takeoverRes.state.deeds[3]!, ownerId: 'player-1' },
+        6: { ...takeoverRes.state.deeds[6]!, ownerId: 'player-1' },
+        8: { ...takeoverRes.state.deeds[8]!, ownerId: 'player-1' },
+        9: { ...takeoverRes.state.deeds[9]!, ownerId: 'player-1' },
+        37: { ...takeoverRes.state.deeds[37]!, ownerId: 'player-1' },
+        39: { ...takeoverRes.state.deeds[39]!, ownerId: null },
+      },
+      players: takeoverRes.state.players.map((p, idx) =>
+        idx === 0 ? { ...p, position: 39, cash: 10000 } : p,
+      ),
+    };
+    const winRes = applyGameAction(preMonopoly, {
+      type: 'BUY_CURRENT_TILE',
+      playerId: 'player-1',
+    });
+    expect(winRes.ok).toBe(true);
+    expect(winRes.state.phase).toBe('GAME_OVER');
+    expect(winRes.state.winnerId).toBe('player-1');
+    expect(winRes.state.victoryReason).toContain('ผูกขาดที่ดินครบ');
+  });
 });

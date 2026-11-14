@@ -41,7 +41,6 @@ export function WalletDeedsPanel({
   gameState,
   inspectedPlayerId,
   myPlayerId,
-  isSpectator = false,
   selectedTileIndex = null,
   onSelectPlayer,
   onSelectTile,
@@ -49,8 +48,8 @@ export function WalletDeedsPanel({
   const [deedViewMode, setDeedViewMode] = useState<'hand' | 'list'>('hand');
   const [hoveredTileIndex, setHoveredTileIndex] = useState<number | null>(null);
 
-  const canInspectOthers = isSpectator || !myPlayerId;
-  const effectivePlayerId = canInspectOthers ? inspectedPlayerId : myPlayerId;
+  const effectivePlayerId =
+    inspectedPlayerId || myPlayerId || getCurrentPlayer(gameState).id;
 
   const player =
     gameState.players.find((p) => p.id === effectivePlayerId) ??
@@ -91,29 +90,23 @@ export function WalletDeedsPanel({
             กระเป๋าเงิน & โฉนด
           </span>
         </div>
-        {canInspectOthers ? (
-          <div className="flex flex-wrap gap-1">
-            {gameState.players.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => onSelectPlayer(p.id)}
-                className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
-                  p.id === player.id
-                    ? 'border-amber-300 bg-amber-300/20 text-amber-100'
-                    : 'border-stone-700 bg-stone-950/60 text-stone-400 hover:text-stone-200'
-                }`}
-              >
-                <PlayerToken tokenId={p.tokenId} color={p.color} size={14} />
-                <span className="max-w-[58px] truncate">{p.name}</span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <span className="rounded-lg border border-emerald-500/40 bg-emerald-950/60 px-2 py-0.5 text-[10px] font-bold text-emerald-200">
-            เฉพาะของฉัน (ส่วนตัว)
-          </span>
-        )}
+        <div className="flex flex-wrap gap-1">
+          {gameState.players.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => onSelectPlayer(p.id)}
+              className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold transition ${
+                p.id === player.id
+                  ? 'border-amber-300 bg-amber-300/20 text-amber-100'
+                  : 'border-stone-700 bg-stone-950/60 text-stone-400 hover:text-stone-200'
+              }`}
+            >
+              <PlayerToken tokenId={p.tokenId} color={p.color} size={14} />
+              <span className="max-w-[64px] truncate">{p.name}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Total Cash & Net Worth */}
@@ -195,132 +188,171 @@ export function WalletDeedsPanel({
             ยังไม่มีโฉนดในครอบครอง
           </div>
         ) : deedViewMode === 'hand' ? (
-          <div className="rounded-xl border border-amber-500/20 bg-gradient-to-b from-stone-950/75 to-[#163623]/75">
-            <div className="deed-hand-scroll flex w-full overflow-x-auto px-4 pt-8 pb-4">
-              <div className="mx-auto flex min-w-max items-end justify-center px-3">
-                {orderedHandTiles.map((tile, idx) => {
-                  const deed = gameState.deeds[tile.index]!;
-                  const meta = tile.colorGroup ? COLOR_GROUP_META[tile.colorGroup] : null;
+          <div className="overflow-visible rounded-xl border border-amber-500/20 bg-gradient-to-b from-stone-950/75 to-[#163623]/75 select-none">
+            <div
+              className="flex w-full justify-center overflow-visible px-3 pt-10 pb-4"
+              onMouseLeave={() => setHoveredTileIndex(null)}
+            >
+              <div className="mx-auto flex max-w-full items-end justify-center px-2">
+                {(() => {
                   const count = orderedHandTiles.length;
-                  const mid = (count - 1) / 2;
-                  const offset = idx - mid;
-                  const maxDeg = Math.min(13, Math.max(4, count * 1.6));
-                  const fanDeg = count <= 1 ? 0 : (offset / Math.max(1, mid)) * maxDeg;
-                  const arcY =
-                    count <= 2 ? 0 : Math.round((offset * offset) / Math.max(1, mid * mid) * 11);
-
-                  const isStandingOn =
-                    currentPlayer.id === player.id && currentPlayer.position === tile.index;
-                  const isLifted =
-                    hoveredTileIndex === tile.index || selectedTileIndex === tile.index;
-
-                  const currentRent =
-                    tile.type === 'utility'
-                      ? null
-                      : calculateRent(gameState, tile.index, 7);
-
-                  return (
-                    <button
-                      key={tile.index}
-                      type="button"
-                      onMouseEnter={() => setHoveredTileIndex(tile.index)}
-                      onMouseLeave={() => setHoveredTileIndex(null)}
-                      onFocus={() => setHoveredTileIndex(tile.index)}
-                      onBlur={() => setHoveredTileIndex(null)}
-                      onClick={() => onSelectTile(tile.index)}
-                      style={{
-                        transform: isLifted
-                          ? 'rotate(0deg) translateY(-18px) scale(1.08)'
-                          : `rotate(${fanDeg.toFixed(2)}deg) translateY(${arcY}px)`,
-                        transformOrigin: '50% 90%',
-                        zIndex: isLifted ? 40 : idx + 1,
-                      }}
-                      title={`#${tile.deedNumber} ${tile.name} — แตะเพื่อดูรายละเอียดโฉนด`}
-                      className={`deed-hand-card relative flex h-[132px] w-[96px] shrink-0 flex-col justify-between overflow-hidden rounded-xl border-2 bg-[#f7f0de] text-left text-[#1c1814] focus:outline-none sm:h-[140px] sm:w-[104px] ${
-                        idx > 0 ? '-ml-7 sm:-ml-6' : ''
-                      } ${
-                        isStandingOn
-                          ? 'border-emerald-400 ring-2 ring-emerald-300/80'
-                          : isLifted
-                            ? 'border-amber-400'
-                            : 'border-[#2a2118]'
-                      }`}
-                    >
-                      {/* Top Color Band */}
-                      <div
-                        className="flex items-center justify-between px-1.5 py-1"
-                        style={{
-                          backgroundColor: meta?.bandBg ?? '#1C6B3A',
-                          color: meta?.bandText ?? '#FFF8EB',
-                          borderBottom: `1.5px solid ${meta?.borderColor ?? '#123d23'}`,
-                        }}
-                      >
-                        <span className="mono-num text-[10px] font-extrabold leading-none">
-                          #{tile.deedNumber}
-                        </span>
-                        {deed.hasHotel ? (
-                          <HotelPiece size={13} />
-                        ) : deed.houses > 0 ? (
-                          <span className="flex items-center -space-x-1">
-                            {Array.from({ length: deed.houses }).map((_, i) => (
-                              <HousePiece key={i} size={10} />
-                            ))}
-                          </span>
-                        ) : null}
-                      </div>
-
-                      {/* Card Body */}
-                      <div className="relative flex flex-1 flex-col justify-between p-1.5">
-                        <div>
-                          <div className="text-[8.5px] font-bold tracking-wider text-stone-500 uppercase">
-                            โฉนดที่ดิน
-                          </div>
-                          <div className="mt-0.5 line-clamp-2 text-[11px] font-extrabold leading-tight text-stone-900">
-                            {tile.name}
-                          </div>
-                        </div>
-
-                        <div className="space-y-0.5 border-t border-dashed border-stone-400/70 pt-1 text-[9.5px]">
-                          {tile.price !== undefined && (
-                            <div className="flex items-center justify-between text-stone-700">
-                              <span>ราคา</span>
-                              <span className="mono-num font-bold">
-                                ฿{formatBahtNumber(tile.price)}
-                              </span>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-between text-[#1b7a43]">
-                            <span>ค่าเช่า</span>
-                            <span className="mono-num font-extrabold">
-                              {currentRent !== null
-                                ? `฿${formatBahtNumber(currentRent)}`
-                                : '40/100×'}
-                            </span>
-                          </div>
-                        </div>
-
-                        {deed.isMortgaged && (
-                          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-900/20">
-                            <span className="-rotate-12 rounded border border-red-950 bg-red-600/95 px-1.5 py-0.5 text-[10px] font-extrabold text-white shadow">
-                              จำนอง
-                            </span>
-                          </div>
-                        )}
-
-                        {isStandingOn && canUpgradeHere && (
-                          <div className="mt-0.5 flex items-center justify-center gap-0.5 rounded bg-emerald-600 px-1 py-0.5 text-[8.5px] font-extrabold text-white">
-                            <Sparkles className="h-2.5 w-2.5 shrink-0" />
-                            <span>{canBuildHere ? 'สร้างบ้านได้!' : 'ไถ่ถอนได้!'}</span>
-                          </div>
-                        )}
-                      </div>
-                    </button>
+                  const activeFocusIdx = orderedHandTiles.findIndex(
+                    (t) => t.index === (hoveredTileIndex ?? selectedTileIndex),
                   );
-                })}
+                  const overlapPx =
+                    count >= 14
+                      ? -76
+                      : count >= 10
+                        ? -68
+                        : count >= 7
+                          ? -56
+                          : count >= 5
+                            ? -42
+                            : count >= 3
+                              ? -26
+                              : -12;
+
+                  return orderedHandTiles.map((tile, idx) => {
+                    const deed = gameState.deeds[tile.index]!;
+                    const meta = tile.colorGroup ? COLOR_GROUP_META[tile.colorGroup] : null;
+                    const mid = (count - 1) / 2;
+                    const offset = idx - mid;
+                    const maxDeg = Math.min(14, Math.max(4, count * 1.6));
+                    const fanDeg = count <= 1 ? 0 : (offset / Math.max(1, mid)) * maxDeg;
+                    const arcY =
+                      count <= 2 ? 0 : Math.round(((offset * offset) / Math.max(1, mid * mid)) * 12);
+
+                    const isStandingOn =
+                      currentPlayer.id === player.id && currentPlayer.position === tile.index;
+                    const isLifted =
+                      hoveredTileIndex === tile.index || selectedTileIndex === tile.index;
+
+                    let neighborPushX = 0;
+                    if (activeFocusIdx !== -1 && idx !== activeFocusIdx) {
+                      const dist = Math.abs(idx - activeFocusIdx);
+                      if (dist <= 3) {
+                        const pushBase = count >= 8 ? 30 : 22;
+                        neighborPushX = idx < activeFocusIdx ? -pushBase / dist : pushBase / dist;
+                      }
+                    }
+
+                    const currentRent =
+                      tile.type === 'utility'
+                        ? null
+                        : calculateRent(gameState, tile.index, 7);
+
+                    return (
+                      <button
+                        key={tile.index}
+                        type="button"
+                        onPointerEnter={() => setHoveredTileIndex(tile.index)}
+                        onPointerMove={() => {
+                          if (hoveredTileIndex !== tile.index) setHoveredTileIndex(tile.index);
+                        }}
+                        onFocus={() => setHoveredTileIndex(tile.index)}
+                        onBlur={() =>
+                          setHoveredTileIndex((prev) => (prev === tile.index ? null : prev))
+                        }
+                        onClick={() => onSelectTile(tile.index)}
+                        style={{
+                          transform: `translate3d(${neighborPushX.toFixed(1)}px, 0, 0)`,
+                          marginLeft: idx === 0 ? '0px' : `${overlapPx}px`,
+                          zIndex: isLifted ? 55 : idx + 1,
+                        }}
+                        title={`#${tile.deedNumber} ${tile.name} — คลิกเพื่อดูรายละเอียดโฉนด`}
+                        className="deed-hand-slot relative shrink-0 bg-transparent p-0 text-left focus:outline-none"
+                      >
+                        <div
+                          style={{
+                            transform: isLifted
+                              ? 'translate3d(0, -28px, 0) scale(1.12) rotate(0deg)'
+                              : `translate3d(0, ${arcY}px, 0) rotate(${fanDeg.toFixed(2)}deg)`,
+                          }}
+                          className={`deed-hand-card relative flex h-[132px] w-[96px] flex-col justify-between overflow-hidden rounded-xl border-2 bg-[#f7f0de] text-[#1c1814] sm:h-[140px] sm:w-[104px] ${
+                            isStandingOn
+                              ? 'border-emerald-400 ring-2 ring-emerald-300/80'
+                              : isLifted
+                                ? 'border-amber-400 shadow-[0_18px_32px_rgba(0,0,0,0.65)] ring-2 ring-amber-300/90'
+                                : 'border-[#2a2118]'
+                          }`}
+                        >
+                          {/* Top Color Band */}
+                          <div
+                            className="flex items-center justify-between px-1.5 py-1"
+                            style={{
+                              backgroundColor: meta?.bandBg ?? '#1C6B3A',
+                              color: meta?.bandText ?? '#FFF8EB',
+                              borderBottom: `1.5px solid ${meta?.borderColor ?? '#123d23'}`,
+                            }}
+                          >
+                            <span className="mono-num text-[10px] font-extrabold leading-none">
+                              #{tile.deedNumber}
+                            </span>
+                            {deed.hasHotel ? (
+                              <HotelPiece size={13} />
+                            ) : deed.houses > 0 ? (
+                              <span className="flex items-center -space-x-1">
+                                {Array.from({ length: deed.houses }).map((_, i) => (
+                                  <HousePiece key={i} size={10} />
+                                ))}
+                              </span>
+                            ) : null}
+                          </div>
+
+                          {/* Card Body */}
+                          <div className="relative flex flex-1 flex-col justify-between p-1.5">
+                            <div>
+                              <div className="text-[8.5px] font-bold tracking-wider text-stone-500 uppercase">
+                                โฉนดที่ดิน
+                              </div>
+                              <div className="mt-0.5 line-clamp-2 text-[11px] font-extrabold leading-tight text-stone-900">
+                                {tile.name}
+                              </div>
+                            </div>
+
+                            <div className="space-y-0.5 border-t border-dashed border-stone-400/70 pt-1 text-[9.5px]">
+                              {tile.price !== undefined && (
+                                <div className="flex items-center justify-between text-stone-700">
+                                  <span>ราคา</span>
+                                  <span className="mono-num font-bold">
+                                    ฿{formatBahtNumber(tile.price)}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="flex items-center justify-between text-[#1b7a43]">
+                                <span>ค่าเช่า</span>
+                                <span className="mono-num font-extrabold">
+                                  {currentRent !== null
+                                    ? `฿${formatBahtNumber(currentRent)}`
+                                    : '40/100×'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {deed.isMortgaged && (
+                              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-900/20">
+                                <span className="-rotate-12 rounded border border-red-950 bg-red-600/95 px-1.5 py-0.5 text-[10px] font-extrabold text-white shadow">
+                                  จำนอง
+                                </span>
+                              </div>
+                            )}
+
+                            {isStandingOn && canUpgradeHere && (
+                              <div className="mt-0.5 flex items-center justify-center gap-0.5 rounded bg-emerald-600 px-1 py-0.5 text-[8.5px] font-extrabold text-white">
+                                <Sparkles className="h-2.5 w-2.5 shrink-0" />
+                                <span>{canBuildHere ? 'สร้างบ้านได้!' : 'ไถ่ถอนได้!'}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  });
+                })()}
               </div>
             </div>
             <div className="border-t border-white/10 px-3 py-1.5 text-center text-[10px] text-amber-200/80">
-              แตะที่การ์ดโฉนดบนมือเพื่อหยิบดูตารางค่าเช่า สร้างบ้าน หรือจำนอง
+              เลื่อนเมาส์รูดเลือกไพ่โฉนดบนมือ แล้วคลิกเพื่อเปิดรายละเอียดโฉนด
             </div>
           </div>
         ) : (

@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { DiceRollResult, GameState } from '@super-millionaire/shared';
+import type { BoardMapTheme, DiceRollResult, GameState } from '@super-millionaire/shared';
 import {
   createBoardCanvasTexturePair,
   tileIndexToWorldXZ,
   type TileWorldCoords,
 } from './boardTexture';
 import {
+  createDesignerToyToken,
   createFallbackModel,
+  createOwnerBuildingMesh,
+  createTileLandmarkModel,
   loadNormalizedGLB,
   MODEL_URLS,
 } from './modelLoader';
@@ -18,6 +21,10 @@ import {
   createMortgageBadgeTexture,
   getDiceTargetQuaternion,
 } from './dice3dMesh';
+import {
+  createBoardEnvironment,
+  type BoardEnvironmentController,
+} from './boardEnvironmentMap';
 
 // Pre-allocated scratch math & building plinths outside animate() for steady 60 FPS
 const _camGoal = new THREE.Vector3();
@@ -71,6 +78,7 @@ interface TokenRuntime {
   root: THREE.Group;
   modelHolder: THREE.Group;
   ringMat: THREE.MeshStandardMaterial;
+  tokenId: number;
   currentX: number;
   currentZ: number;
   startX: number;
@@ -184,18 +192,6 @@ function lerpAngle(current: number, target: number, alpha: number): number {
   return current + diff * alpha;
 }
 
-function getBoardOrbitAngleForTile(tileIndex: number): number {
-  const idx = ((tileIndex % 40) + 40) % 40;
-  if (idx === 0) return Math.PI * 0.14;
-  if (idx >= 1 && idx <= 9) return (5 - idx) * 0.032;
-  if (idx === 10) return -Math.PI * 0.25;
-  if (idx >= 11 && idx <= 19) return -Math.PI * 0.5 + (15 - idx) * 0.032;
-  if (idx === 20) return -Math.PI * 0.75;
-  if (idx >= 21 && idx <= 29) return Math.PI + (25 - idx) * 0.032;
-  if (idx === 30) return Math.PI * 0.75;
-  return Math.PI * 0.5 + (35 - idx) * 0.032;
-}
-
 export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [webglError, setWebglError] = useState<string | null>(null);
@@ -236,6 +232,11 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     orbitYaw: number;
     boardTopMat: THREE.MeshStandardMaterial;
     boardTexPair: { south: THREE.CanvasTexture; north: THREE.CanvasTexture; dispose: () => void };
+    feltMat: THREE.MeshStandardMaterial;
+    frameMat: THREE.MeshStandardMaterial;
+    hemiLight: THREE.HemisphereLight;
+    envController: BoardEnvironmentController;
+    activeMapTheme: BoardMapTheme;
     activeTopOrientation: 'south' | 'north';
     lastBuildKey: number;
     lastCashFxKey: number;
@@ -277,8 +278,11 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     renderer.domElement.style.touchAction = 'none';
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#0B2518');
-    scene.fog = new THREE.Fog('#0B2518', 24, 42);
+    const initialTheme = latestPropsRef.current.gameState.mapTheme ?? 'siam_park';
+    const envController = createBoardEnvironment(initialTheme);
+    scene.background = new THREE.Color(envController.palette.backgroundHex);
+    scene.fog = new THREE.Fog(envController.palette.fogHex, 24, 44);
+    scene.add(envController.group);
 
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 80);
     if (latestPropsRef.current.cameraMode === 'topdown') {
@@ -293,12 +297,16 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     controls.minPolarAngle = 0.05;
     controls.maxPolarAngle = Math.PI / 2.25;
     controls.minDistance = 6.5;
-    controls.maxDistance = 24;
+    controls.maxDistance = 28;
     controls.target.set(0, 0, 0);
     controls.update();
 
     // Warm tabletop studio lighting
-    const hemiLight = new THREE.HemisphereLight('#FFF8E6', '#163523', 0.85);
+    const hemiLight = new THREE.HemisphereLight(
+      '#FFF8E6',
+      '#163523',
+      envController.palette.ambientIntensity,
+    );
     scene.add(hemiLight);
 
     const sunLight = new THREE.DirectionalLight('#FFF5DB', 1.65);
@@ -306,11 +314,11 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.set(2048, 2048);
     sunLight.shadow.camera.near = 2;
-    sunLight.shadow.camera.far = 36;
-    sunLight.shadow.camera.left = -7.5;
-    sunLight.shadow.camera.right = 7.5;
-    sunLight.shadow.camera.top = 7.5;
-    sunLight.shadow.camera.bottom = -7.5;
+    sunLight.shadow.camera.far = 42;
+    sunLight.shadow.camera.left = -12.5;
+    sunLight.shadow.camera.right = 12.5;
+    sunLight.shadow.camera.top = 12.5;
+    sunLight.shadow.camera.bottom = -12.5;
     sunLight.shadow.bias = -0.0005;
     scene.add(sunLight);
 
@@ -322,23 +330,23 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     centerGlow.position.set(0, 4.5, 0);
     scene.add(centerGlow);
 
-    // Tabletop felt surface
-    const feltGeo = new THREE.CircleGeometry(24, 64);
+    // Deep basin floor beneath the 3D terrain & water moat
+    const feltGeo = new THREE.CircleGeometry(26, 64);
     const feltMat = new THREE.MeshStandardMaterial({
-      color: '#103622',
-      roughness: 0.92,
-      metalness: 0.02,
+      color: envController.palette.tableClothHex,
+      roughness: envController.palette.tableRoughness,
+      metalness: 0.04,
     });
     const feltMesh = new THREE.Mesh(feltGeo, feltMat);
     feltMesh.rotation.x = -Math.PI / 2;
-    feltMesh.position.y = -0.35;
+    feltMesh.position.y = -0.52;
     feltMesh.receiveShadow = true;
     scene.add(feltMesh);
 
     // Outer mahogany wood bevel frame
     const frameGeo = new THREE.BoxGeometry(11.46, 0.3, 11.46);
     const frameMat = new THREE.MeshStandardMaterial({
-      color: '#462613',
+      color: envController.palette.rimHex,
       roughness: 0.55,
       metalness: 0.12,
     });
@@ -529,6 +537,11 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
       orbitYaw: 0,
       boardTopMat,
       boardTexPair,
+      feltMat,
+      frameMat,
+      hemiLight,
+      envController: envController as BoardEnvironmentController,
+      activeMapTheme: initialTheme,
       activeTopOrientation: 'south' as 'south' | 'north',
       lastBuildKey: -1,
       lastCashFxKey: -1,
@@ -666,39 +679,52 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         }
       });
 
-      // 3. Smooth Continuous 3D Dice Throw & Natural 3-Bounce Physics
+      // 3. Smooth Continuous 3D Dice Throw with 4 Parabolic Cushioned Bounces & Quaternion Slerp
       if (bundle.diceThrow.active) {
         const elapsed = now - bundle.diceThrow.startMs;
         const progress = Math.min(1, elapsed / bundle.diceThrow.durationMs);
-        const posEase = easeOutQuart(progress);
-        const rotEase = easeOutQuart(Math.min(1, progress * 1.06));
+        // Smooth quintic deceleration for horizontal glide
+        const posEase = 1 - Math.pow(1 - progress, 4.5);
+        const rotEase = 1 - Math.pow(1 - Math.min(1, progress * 1.03), 3.8);
 
-        // 3 damped parabolic table bounces
-        let bounce = 0;
-        if (progress < 0.5) {
-          bounce = Math.sin((progress / 0.5) * Math.PI) * 1.75;
-        } else if (progress < 0.8) {
-          bounce = Math.sin(((progress - 0.5) / 0.3) * Math.PI) * 0.58;
-        } else {
-          bounce = Math.sin(((progress - 0.8) / 0.2) * Math.PI) * 0.16;
-        }
+        // True parabolic gravity arcs (4 * u * (1 - u)) across 4 cushioned bounces
+        const computeBounce = (p: number): number => {
+          if (p < 0.44) {
+            const u = p / 0.44;
+            return 4 * u * (1 - u) * 1.85;
+          }
+          if (p < 0.72) {
+            const u = (p - 0.44) / 0.28;
+            return 4 * u * (1 - u) * 0.68;
+          }
+          if (p < 0.90) {
+            const u = (p - 0.72) / 0.18;
+            return 4 * u * (1 - u) * 0.22;
+          }
+          const u = (p - 0.90) / 0.10;
+          return 4 * u * (1 - u) * 0.05;
+        };
+
+        const b1 = computeBounce(progress);
+        const b2 = computeBounce(Math.min(1, Math.max(0, (progress - 0.025) / 0.975)));
+        const curveArc = Math.sin(progress * Math.PI) * 0.32;
 
         bundle.die1Mesh.position.set(
-          THREE.MathUtils.lerp(-2.1, -0.52, posEase),
-          0.26 + bounce,
-          THREE.MathUtils.lerp(2.4, 0.36, posEase),
+          THREE.MathUtils.lerp(-2.35, -0.52, posEase) - curveArc,
+          0.26 + b1,
+          THREE.MathUtils.lerp(2.55, 0.36, posEase),
         );
         bundle.die2Mesh.position.set(
-          THREE.MathUtils.lerp(2.1, 0.52, posEase),
-          0.26 + bounce * 0.94,
-          THREE.MathUtils.lerp(2.2, -0.26, posEase),
+          THREE.MathUtils.lerp(2.25, 0.52, posEase) + curveArc,
+          0.26 + b2,
+          THREE.MathUtils.lerp(2.35, -0.26, posEase),
         );
 
-        const spinDecay = 1 - rotEase;
-        _tumbleQuat.setFromAxisAngle(_tumbleAxis1, spinDecay * Math.PI * 5.4);
+        const spinDecay = (1 - rotEase) * (1 - rotEase);
+        _tumbleQuat.setFromAxisAngle(_tumbleAxis1, spinDecay * Math.PI * 6.2);
         bundle.die1Mesh.quaternion.copy(_tumbleQuat).multiply(bundle.diceThrow.die1TargetQuat);
 
-        _tumbleQuat.setFromAxisAngle(_tumbleAxis2, -spinDecay * Math.PI * 5.2);
+        _tumbleQuat.setFromAxisAngle(_tumbleAxis2, -spinDecay * Math.PI * 5.8);
         bundle.die2Mesh.quaternion.copy(_tumbleQuat).multiply(bundle.diceThrow.die2TargetQuat);
 
         if (progress >= 1) {
@@ -752,13 +778,14 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         }
       }
 
-      // 5. Pulse highlight rings
+      // 5. Pulse highlight rings & animate outer 3D environment
       if (bundle.spotlightRing.visible) {
         const pulse = 1 + Math.sin(now * 0.01) * 0.08;
         bundle.spotlightRing.scale.set(pulse, pulse, 1);
       }
+      bundle.envController.update(now * 0.001);
 
-      // 6. Smooth Camera Lerp & 360-degree Board-Orbit Player Focus
+      // 6. Smooth Non-Spinning Follow-Behind Camera (tracks behind owner's character without rotating the board)
       const camOffsetX = camera.position.x - controls.target.x;
       const camOffsetZ = camera.position.z - controls.target.z;
       if (camOffsetX * camOffsetX + camOffsetZ * camOffsetZ > 0.02) {
@@ -787,37 +814,51 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
           bundle.diceThrow.active && ownerId && currentPlayer?.id === ownerId,
         );
         if (currentProps.gameState.phase === 'TURN_ORDER_ROLL' || isOwnerDiceThrow) {
-          // Hold steady center framing over the dice tray without spinning during other players' rolls
-          const diceDist = 8.4;
+          // Hold steady center framing over the dice tray at the current viewing angle (zero rotation)
+          const diceDist = 9.0;
+          _targetGoal.set(0, 0.1, 0);
           _camGoal.set(
             Math.sin(bundle.orbitYaw) * diceDist,
-            9.5,
+            9.2,
             Math.cos(bundle.orbitYaw) * diceDist,
           );
-          _targetGoal.set(0, 0.1, 0);
-          camera.position.lerp(_camGoal, 0.085);
-          controls.target.lerp(_targetGoal, 0.1);
+          camera.position.lerp(_camGoal, 0.075);
+          controls.target.lerp(_targetGoal, 0.085);
         } else if (ownerId) {
-          // Anchor camera strictly to the owner's pawn — never spin during other players' turns
+          // Follow behind the owner's character smoothly by translating camera & target (never spinning orbitYaw!)
           const ownerToken = bundle.tokens.get(ownerId);
           if (ownerToken) {
             const tx = ownerToken.root.position.x;
             const tz = ownerToken.root.position.z;
-            const desiredYaw = getBoardOrbitAngleForTile(ownerToken.tileIndex);
-            const nextYaw = lerpAngle(bundle.orbitYaw, desiredYaw, 0.075);
-            bundle.orbitYaw = nextYaw;
-
+            const isOwnerTurn = currentPlayer?.id === ownerId;
             const isOwnerAnimating = currentProps.animatingPlayerId === ownerId;
-            _targetGoal.set(tx * 0.46, 0.2, tz * 0.46);
-            const orbitDist = isOwnerAnimating ? 8.1 : 8.9;
-            const zoomHeight = isOwnerAnimating ? 6.8 : 7.8;
-            _camGoal.set(
-              _targetGoal.x + Math.sin(nextYaw) * orbitDist,
-              zoomHeight,
-              _targetGoal.z + Math.cos(nextYaw) * orbitDist,
-            );
-            controls.target.lerp(_targetGoal, 0.085);
-            camera.position.lerp(_camGoal, 0.075);
+
+            if (isOwnerTurn || isOwnerAnimating) {
+              // Close follow-behind on owner's turn or movement
+              const trackFactor = isOwnerAnimating ? 0.72 : 0.62;
+              _targetGoal.set(tx * trackFactor, 0.25, tz * trackFactor);
+              const followDist = isOwnerAnimating ? 7.6 : 8.4;
+              const followHeight = isOwnerAnimating ? 6.6 : 7.5;
+              _camGoal.set(
+                _targetGoal.x + Math.sin(bundle.orbitYaw) * followDist,
+                followHeight,
+                _targetGoal.z + Math.cos(bundle.orbitYaw) * followDist,
+              );
+              controls.target.lerp(_targetGoal, 0.08);
+              camera.position.lerp(_camGoal, 0.07);
+            } else {
+              // Calm wider overview anchored gently behind owner during other players' turns
+              _targetGoal.set(tx * 0.28, 0.1, tz * 0.28);
+              const restDist = 10.2;
+              const restHeight = 9.6;
+              _camGoal.set(
+                _targetGoal.x + Math.sin(bundle.orbitYaw) * restDist,
+                restHeight,
+                _targetGoal.z + Math.cos(bundle.orbitYaw) * restDist,
+              );
+              controls.target.lerp(_targetGoal, 0.055);
+              camera.position.lerp(_camGoal, 0.05);
+            }
           }
         }
       }
@@ -861,6 +902,7 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
       die2.dispose();
       chestDeck.dispose();
       chanceDeck.dispose();
+      bundle.envController.dispose();
       boardTexPair.dispose();
       boardSideMat.dispose();
       boardTopMat.dispose();
@@ -886,12 +928,23 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     };
   }, []);
 
-  // Sync Deed Plaques, Mortgage Badges & 3D Houses/Hotels
+  // Sync Deed Plaques, Mortgage Badges, Owner-Colored 3D Houses/Hotels & Tile Location Landmarks
   useEffect(() => {
     const bundle = sceneBundleRef.current;
     if (!bundle) return;
 
     const playerById = new Map(props.gameState.players.map((p) => [p.id, p]));
+    const occupiedTiles = new Set<number>();
+    for (const p of props.gameState.players) {
+      if (!p.isBankrupt) {
+        const pos = props.displayPositions[p.id] ?? p.position;
+        occupiedTiles.add(pos);
+      }
+    }
+    if (props.hopSpotlightTile !== null && props.hopSpotlightTile !== undefined) {
+      occupiedTiles.add(props.hopSpotlightTile);
+    }
+
     const isNewBuild =
       props.recentlyBuilt && props.recentlyBuilt.key !== bundle.lastBuildKey;
     if (props.recentlyBuilt) {
@@ -899,14 +952,14 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
     }
 
     Object.values(props.gameState.deeds).forEach((deed) => {
+      const owner = deed.ownerId ? playerById.get(deed.ownerId) : undefined;
       const plaqueInfo = bundle.plaques.get(deed.tileIndex);
       if (plaqueInfo) {
-        const owner = deed.ownerId ? playerById.get(deed.ownerId) : undefined;
         if (owner) {
           plaqueInfo.plaqueMesh.visible = true;
           plaqueInfo.plaqueMat.color.set(owner.color);
           plaqueInfo.plaqueMat.emissive.set(deed.isMortgaged ? '#000000' : owner.color);
-          plaqueInfo.plaqueMat.emissiveIntensity = deed.isMortgaged ? 0 : 0.18;
+          plaqueInfo.plaqueMat.emissiveIntensity = deed.isMortgaged ? 0 : 0.24;
           plaqueInfo.mortgagePlane.visible = deed.isMortgaged;
         } else {
           plaqueInfo.plaqueMesh.visible = false;
@@ -914,8 +967,18 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         }
       }
 
-      // Buildings diff per tile
-      const sig = `${deed.hasHotel ? 'H' : deed.houses}`;
+      const hasBuildings = deed.hasHotel || deed.houses > 0;
+      const isOccupied = occupiedTiles.has(deed.tileIndex);
+      const showLandmark = !hasBuildings && (Boolean(owner) || isOccupied);
+      const ownerColor = owner?.color ?? '#E3BE3B';
+
+      // Buildings / Landmark diff per tile (includes owner color so ownership changes update color immediately)
+      const sig = hasBuildings
+        ? `B:${ownerColor}:${deed.hasHotel ? 'H' : deed.houses}`
+        : showLandmark
+          ? `L:${owner?.color ?? 'UNOWNED'}`
+          : 'NONE';
+
       const existing = bundle.buildings.get(deed.tileIndex);
       if (existing && existing.signature === sig) {
         if (isNewBuild && props.recentlyBuilt?.tileIndex === deed.tileIndex) {
@@ -930,68 +993,89 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         bundle.buildings.delete(deed.tileIndex);
       }
 
-      if (!deed.hasHotel && deed.houses <= 0) return;
+      if (sig === 'NONE') return;
 
       const coords = tileIndexToWorldXZ(deed.tileIndex);
-      const count = deed.hasHotel ? 1 : Math.min(4, deed.houses);
-      const positions = getInnerBuildingPositions(coords, count, deed.hasHotel);
       const group = new THREE.Group();
-      const shouldPop = isNewBuild && props.recentlyBuilt?.tileIndex === deed.tileIndex;
 
-      positions.forEach((pos, pIdx) => {
+      if (hasBuildings) {
+        const count = deed.hasHotel ? 1 : Math.min(4, deed.houses);
+        const positions = getInnerBuildingPositions(coords, count, deed.hasHotel);
+        const shouldPop = isNewBuild && props.recentlyBuilt?.tileIndex === deed.tileIndex;
+
+        const plinthMat = new THREE.MeshStandardMaterial({
+          color: ownerColor,
+          emissive: ownerColor,
+          emissiveIntensity: deed.hasHotel ? 0.32 : 0.18,
+          roughness: 0.28,
+          metalness: 0.45,
+        });
+
+        positions.forEach((pos) => {
+          const slot = new THREE.Group();
+          slot.position.set(pos.x, 0, pos.z);
+          slot.rotation.y = pos.rotY;
+
+          const plinthHeight = deed.hasHotel ? 0.055 : 0.032;
+          const plinth = new THREE.Mesh(
+            deed.hasHotel ? _hotelPlinthGeo : _housePlinthGeo,
+            plinthMat,
+          );
+          plinth.position.y = plinthHeight / 2;
+          plinth.castShadow = true;
+          plinth.receiveShadow = true;
+          slot.add(plinth);
+
+          const modelAnchor = new THREE.Group();
+          modelAnchor.position.y = plinthHeight;
+          const targetSize = deed.hasHotel ? 0.62 : 0.36;
+          const kind = deed.hasHotel ? 'hotel' : 'house';
+          const buildingMesh = createOwnerBuildingMesh(kind, ownerColor, targetSize);
+          modelAnchor.add(buildingMesh);
+          slot.add(modelAnchor);
+
+          group.add(slot);
+        });
+
+        bundle.buildingLayer.add(group);
+        bundle.buildings.set(deed.tileIndex, {
+          group,
+          signature: sig,
+          popStartMs: shouldPop ? performance.now() : 0,
+          isPopping: Boolean(shouldPop),
+        });
+      } else if (showLandmark) {
+        // Show 3D Location Landmark miniature on inner side of tile when landed on or owned
+        const positions = getInnerBuildingPositions(coords, 1, true);
+        const pos = positions[0]!;
         const slot = new THREE.Group();
         slot.position.set(pos.x, 0, pos.z);
         slot.rotation.y = pos.rotY;
 
-        // Grounded luxury plinth so houses & hotels stand prominently above the board
-        const plinthHeight = deed.hasHotel ? 0.055 : 0.032;
-        const plinth = new THREE.Mesh(
-          deed.hasHotel ? _hotelPlinthGeo : _housePlinthGeo,
-          deed.hasHotel ? _hotelPlinthMat : _housePlinthMat,
+        const landmark = createTileLandmarkModel(
+          deed.tileIndex,
+          owner?.color ?? null,
+          owner ? 0.44 : 0.48,
         );
-        plinth.position.y = plinthHeight / 2;
-        plinth.castShadow = true;
-        plinth.receiveShadow = true;
-        slot.add(plinth);
-
-        const modelAnchor = new THREE.Group();
-        modelAnchor.position.y = plinthHeight;
-        slot.add(modelAnchor);
-
-        const targetSize = deed.hasHotel ? 0.72 : 0.36;
-        const kind = deed.hasHotel ? 'hotel' : 'house';
-        const url = deed.hasHotel
-          ? deed.tileIndex % 2 === 0
-            ? MODEL_URLS.hotel
-            : MODEL_URLS.hotelAlt
-          : pIdx % 2 === 0
-            ? MODEL_URLS.house
-            : MODEL_URLS.houseAlt;
-        const fallback = createFallbackModel(kind, targetSize);
-        modelAnchor.add(fallback);
-
-        loadNormalizedGLB(url, targetSize)
-          .then((model) => {
-            if (!modelAnchor.parent) return;
-            modelAnchor.remove(fallback);
-            modelAnchor.add(model);
-          })
-          .catch(() => {
-            // Keep clean geometric fallback
-          });
-
+        slot.add(landmark);
         group.add(slot);
-      });
 
-      bundle.buildingLayer.add(group);
-      bundle.buildings.set(deed.tileIndex, {
-        group,
-        signature: sig,
-        popStartMs: shouldPop ? performance.now() : 0,
-        isPopping: Boolean(shouldPop),
-      });
+        bundle.buildingLayer.add(group);
+        bundle.buildings.set(deed.tileIndex, {
+          group,
+          signature: sig,
+          popStartMs: performance.now(),
+          isPopping: true,
+        });
+      }
     });
-  }, [props.gameState.deeds, props.gameState.players, props.recentlyBuilt]);
+  }, [
+    props.gameState.deeds,
+    props.gameState.players,
+    props.displayPositions,
+    props.hopSpotlightTile,
+    props.recentlyBuilt,
+  ]);
 
   // Sync Player Tokens & Hop Animations
   useEffect(() => {
@@ -1031,6 +1115,12 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
       const yaw = getTravelYaw(tileIdx);
 
       let runtime = bundle.tokens.get(player.id);
+      if (runtime && runtime.tokenId !== player.tokenId) {
+        bundle.tokenLayer.remove(runtime.root);
+        runtime.disposables.forEach((d) => d.dispose());
+        bundle.tokens.delete(player.id);
+        runtime = undefined;
+      }
       if (!runtime) {
         const root = new THREE.Group();
         root.position.set(tx, 0, tz);
@@ -1062,20 +1152,10 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
         modelHolder.position.y = 0.07;
         modelHolder.rotation.y = yaw;
 
-        const tokenUrl = MODEL_URLS.tokens[player.tokenId % MODEL_URLS.tokens.length];
-        const targetSize = player.tokenId % 6 === 4 ? 0.66 : 0.6;
-        const fallback = createFallbackModel('token', targetSize, player.color);
-        modelHolder.add(fallback);
-
-        loadNormalizedGLB(tokenUrl, targetSize)
-          .then((model) => {
-            if (!modelHolder.parent) return;
-            modelHolder.remove(fallback);
-            modelHolder.add(model);
-          })
-          .catch(() => {
-            // Keep clean geometric pawn fallback
-          });
+        const tokenCount = MODEL_URLS.tokens.length;
+        const tokenIdx = ((player.tokenId % tokenCount) + tokenCount) % tokenCount;
+        const toyToken = createDesignerToyToken(tokenIdx, player.color, 0.72);
+        modelHolder.add(toyToken);
 
         root.add(baseMesh, ringMesh, modelHolder);
         bundle.tokenLayer.add(root);
@@ -1084,6 +1164,7 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
           root,
           modelHolder,
           ringMat,
+          tokenId: player.tokenId,
           currentX: tx,
           currentZ: tz,
           startX: tx,
@@ -1158,7 +1239,7 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
       bundle.diceThrow = {
         active: true,
         startMs: performance.now(),
-        durationMs: 880,
+        durationMs: 1020,
         die1TargetQuat: target1Quat,
         die2TargetQuat: target2Quat,
       };
@@ -1170,6 +1251,29 @@ export function SuperMillionaire3DScene(props: SuperMillionaire3DSceneProps) {
       bundle.die2Mesh.quaternion.copy(target2Quat);
     }
   }, [props.throwKey, props.gameState.lastDice, props.thrownDiceFaces]);
+
+  // Sync 3D Outer Environment Map Theme when gameState.mapTheme changes
+  useEffect(() => {
+    const bundle = sceneBundleRef.current;
+    if (!bundle) return;
+    const nextTheme = props.gameState.mapTheme ?? 'siam_park';
+    if (bundle.activeMapTheme === nextTheme) return;
+
+    bundle.scene.remove(bundle.envController.group);
+    bundle.envController.dispose();
+
+    const nextEnv = createBoardEnvironment(nextTheme);
+    bundle.envController = nextEnv;
+    bundle.activeMapTheme = nextTheme;
+    bundle.scene.add(nextEnv.group);
+
+    bundle.scene.background = new THREE.Color(nextEnv.palette.backgroundHex);
+    bundle.scene.fog = new THREE.Fog(nextEnv.palette.fogHex, 24, 44);
+    bundle.feltMat.color.set(nextEnv.palette.tableClothHex);
+    bundle.feltMat.roughness = nextEnv.palette.tableRoughness;
+    bundle.frameMat.color.set(nextEnv.palette.rimHex);
+    bundle.hemiLight.intensity = nextEnv.palette.ambientIntensity;
+  }, [props.gameState.mapTheme]);
 
   // Trigger 3D Deck Lift Pulse when Chance/Chest Card Draws
   useEffect(() => {

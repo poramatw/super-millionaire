@@ -1,4 +1,10 @@
-import type { CardDefinition, ColorGroup, TileDefinition } from './types.js';
+import type {
+  BoardMapTheme,
+  BoardMapThemeMeta,
+  CardDefinition,
+  ColorGroup,
+  TileDefinition,
+} from './types.js';
 
 export const START_BONUS = 2000;
 export const JAIL_BAIL_AMOUNT = 500;
@@ -21,14 +27,47 @@ export const PLAYER_COLORS: readonly string[] = [
 ] as const;
 
 export const TOKEN_NAMES: readonly string[] = [
-  'รถคลาสสิก',
-  'เรือสำเภา',
-  'ช้างศึก',
-  'ตุ๊กตุ๊ก',
-  'หมวกเศรษฐี',
-  'ถุงทอง',
-  'รถซุปเปอร์คาร์',
-  'ราชสีห์ทอง',
+  'เหมียวนำโชค',
+  'ชิบะจอมลุย',
+  'แพนด้าเจ้าสัว',
+  'ต่ายน้อยร้อยล้าน',
+  'หนุ่มน้อยนักลงทุน',
+  'สาวน้อยไฮโซ',
+  'เพนกวินทักซิโด้',
+  'จิ้งจอกจอมดีล',
+  'ลูกเจี๊ยบเศรษฐี',
+  'ช้างน้อยคู่บารมี',
+  'บาริสต้าหนุ่มชิค',
+  'คุณหนูนักช้อป',
+] as const;
+
+export const DEFAULT_BOARD_MAP_THEME: BoardMapTheme = 'siam_park';
+
+export const BOARD_MAP_THEMES: readonly BoardMapThemeMeta[] = [
+  {
+    id: 'siam_park',
+    name: 'ตลาดน้ำ & อุทยานสยาม',
+    subtitle: 'คลองน้ำใส เรือสำเภา บ้านเรือนไทย และต้นไม้ร่มรื่นรอบกระดาน',
+    badge: 'แนะนำ',
+  },
+  {
+    id: 'bangkok_metro',
+    name: 'มหานครกรุงเทพฯ',
+    subtitle: 'ตึกระฟ้า ย่านธุรกิจ ถนนวงแหวน และรถวิ่งรอบเมือง',
+    badge: 'เมืองหลวง',
+  },
+  {
+    id: 'tropical_island',
+    name: 'เกาะสวรรค์อันดามัน',
+    subtitle: 'หาดทรายทองกลางทะเลสีคราม เรือใบ ต้นมะพร้าว และประภาคาร',
+    badge: 'ริมทะเล',
+  },
+  {
+    id: 'royal_palace',
+    name: 'ท้องพระโรงทองคำ',
+    subtitle: 'โถงหินอ่อนลายไทย เสาหลักทองคำ หีบมหาสมบัติ และพรมหลวง',
+    badge: 'คลาสสิก',
+  },
 ] as const;
 
 export const BOT_DEFAULT_NAMES: readonly string[] = [

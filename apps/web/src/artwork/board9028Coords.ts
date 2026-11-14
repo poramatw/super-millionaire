@@ -132,7 +132,7 @@ export const BOARD_9028_RECTS: TileRect[] = [
   }),
 
   // 20: Top-left corner (แวะพักผ่อนคนจน)
-  makeRect(20, 'corner', OUTER_LEFT, OUTER_TOP, TOP_X[0], TOP_BOTTOM, 0, 'none'),
+  makeRect(20, 'corner', OUTER_LEFT, OUTER_TOP, TOP_X[0], TOP_BOTTOM, 180, 'none'),
 
   // 21..29: Top row left-to-right (เพชรบุรี .. โคราช)
   ...Array.from({ length: 9 }, (_, i) => {
@@ -150,7 +150,7 @@ export const BOARD_9028_RECTS: TileRect[] = [
   }),
 
   // 30: Top-right corner (ไปติดคุก)
-  makeRect(30, 'corner', TOP_X[9], OUTER_TOP, OUTER_RIGHT, RIGHT_Y[0], 0, 'none'),
+  makeRect(30, 'corner', TOP_X[9], OUTER_TOP, OUTER_RIGHT, RIGHT_Y[0], 180, 'none'),
 
   // 31..39: Right column top-to-bottom (ศรีสะเกษ .. เสาชิงช้า)
   ...Array.from({ length: 9 }, (_, i) => {

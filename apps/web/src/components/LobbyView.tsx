@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react';
 import {
+  BOARD_MAP_THEMES,
   BOT_DEFAULT_NAMES,
+  DEFAULT_BOARD_MAP_THEME,
+  DEFAULT_GAME_RULES,
+  normalizeGameRules,
   PLAYER_COLORS,
   TOKEN_NAMES,
+  type BoardMapTheme,
   type BotStyle,
+  type GameRulesConfig,
   type PlayerSlotConfig,
   type RoomActionAck,
   type RoomConfig,
@@ -13,17 +19,23 @@ import {
 import {
   Bot,
   Check,
+  Clock,
   Copy,
   Crown,
   Eye,
+  Flame,
   LogOut,
+  Map as MapIcon,
   Play,
   PlusCircle,
-// Removed unused Sparkles & BankerAvatar after removing Screen 1 AI slop badges.
+  Sparkles,
+  Trophy,
   User,
   Users,
+  Zap,
 } from 'lucide-react';
-import { BankerAvatar, BoardCenterArt, PlayerToken } from '../artwork';
+import { BoardCenterArt, PlayerToken } from '../artwork';
+import { Lobby3DPreview, type LobbyPreviewFocus } from './Lobby3DPreview';
 import type { ConnectionStatus, TransportMode } from '../hooks/useSocketGame';
 
 export interface LobbyViewProps {
@@ -42,8 +54,13 @@ export interface LobbyViewProps {
     playerName: string,
     preferredSeatIndex?: number,
     asSpectator?: boolean,
+    preferredTokenId?: number,
   ) => Promise<RoomJoinAck>;
-  onSelectSeat: (seatIndex: number, playerName: string) => Promise<RoomJoinAck>;
+  onSelectSeat: (
+    seatIndex: number,
+    playerName: string,
+    preferredTokenId?: number,
+  ) => Promise<RoomJoinAck>;
   onUpdateRoomConfig: (config: RoomConfig) => Promise<RoomActionAck>;
   onSetReady: (ready: boolean) => void;
   onStartGame: () => Promise<RoomActionAck>;
@@ -51,9 +68,9 @@ export interface LobbyViewProps {
 }
 
 const BOT_STYLE_LABELS: Record<BotStyle, string> = {
-  aggressive: 'ดุดัน (Aggressive)',
-  balanced: 'สมดุล (Balanced)',
-  cautious: 'รอบคอบ (Cautious)',
+  aggressive: 'สายบุกดุดัน',
+  balanced: 'สายสมดุล',
+  cautious: 'สายรอบคอบ',
 };
 
 function extractRoomCode(raw: string): string {
@@ -81,19 +98,274 @@ function buildDefaultConfig(
   totalSeats: 2 | 3 | 4 | 5 | 6 | 7 | 8 = 4,
   mode: 'mixed' | 'allBots' | 'allHumans' = 'mixed',
   forOnline = false,
+  mapTheme: BoardMapTheme = DEFAULT_BOARD_MAP_THEME,
+  hostTokenId = 0,
+  rules: GameRulesConfig = DEFAULT_GAME_RULES,
 ): RoomConfig {
   const mixedHumanCount = forOnline && totalSeats >= 3 ? 2 : 1;
+  const usedTokens = new Set<number>([hostTokenId]);
   const slots: PlayerSlotConfig[] = Array.from({ length: totalSeats }, (_, idx) => {
     const isBot =
       mode === 'allBots' ? true : mode === 'allHumans' ? false : idx >= mixedHumanCount;
+    let tokenId = idx === 0 ? hostTokenId : idx % TOKEN_NAMES.length;
+    if (idx !== 0) {
+      while (usedTokens.has(tokenId)) {
+        tokenId = (tokenId + 1) % TOKEN_NAMES.length;
+      }
+      usedTokens.add(tokenId);
+    }
     return {
       seatIndex: idx,
       kind: isBot ? 'bot' : 'human',
       name: isBot ? BOT_DEFAULT_NAMES[idx % BOT_DEFAULT_NAMES.length] : undefined,
       botStyle: isBot ? (idx % 3 === 1 ? 'aggressive' : idx % 3 === 2 ? 'cautious' : 'balanced') : undefined,
+      tokenId,
     };
   });
-  return { totalSeats, slots };
+  return { totalSeats, mapTheme, rules: normalizeGameRules(rules), slots };
+}
+
+function GameRulesConfigurator({
+  rules,
+  readOnly = false,
+  onChange,
+}: {
+  rules: GameRulesConfig;
+  readOnly?: boolean;
+  onChange: (next: GameRulesConfig) => void;
+}) {
+  const maxRoundOptions: Array<{ value: GameRulesConfig['maxRounds']; label: string }> = [
+    { value: null, label: 'ไม่จำกัดรอบ' },
+    { value: 20, label: '20 รอบ' },
+    { value: 30, label: '30 รอบ' },
+    { value: 40, label: '40 รอบ' },
+  ];
+
+  return (
+    <div className="space-y-3 rounded-xl border border-amber-400/25 bg-black/35 p-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-amber-200 uppercase">
+          <Trophy className="h-3.5 w-3.5 text-amber-300" />
+          ตั้งค่ากติกาพิเศษ & เงื่อนไขการชนะ
+        </span>
+        {readOnly && (
+          <span className="text-[10px] text-stone-400">เจ้าบ้านเป็นผู้ปรับตั้งค่ากติกา</span>
+        )}
+      </div>
+
+      {/* Round Limit Selector */}
+      <div>
+        <div className="flex items-center justify-between text-[11px] text-stone-300">
+          <span className="inline-flex items-center gap-1 font-semibold text-amber-100">
+            <Clock className="h-3 w-3 text-amber-300" />
+            จำกัดจำนวนรอบสูงสุด (ตัดสินด้วยทรัพย์สินสุทธิ)
+          </span>
+          <span className="mono-num font-bold text-emerald-300">
+            {rules.maxRounds ? `${rules.maxRounds} รอบ` : 'เล่นจนกว่าจะล้มละลาย'}
+          </span>
+        </div>
+        <div className="mt-1.5 grid grid-cols-4 gap-1 rounded-xl border border-amber-400/20 bg-stone-950/80 p-1 text-xs">
+          {maxRoundOptions.map((opt) => {
+            const active = rules.maxRounds === opt.value;
+            return (
+              <button
+                key={String(opt.value)}
+                type="button"
+                disabled={readOnly}
+                onClick={() => onChange({ ...rules, maxRounds: opt.value })}
+                className={`tactile-btn rounded-lg px-2 py-1.5 text-[11px] font-extrabold transition ${
+                  active
+                    ? 'bg-gradient-to-b from-amber-300 to-amber-500 text-stone-950 shadow'
+                    : 'text-stone-300 hover:bg-white/5 hover:text-amber-100 disabled:opacity-60'
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3 Mechanic Toggles */}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={() => onChange({ ...rules, monopolyVictory: !rules.monopolyVictory })}
+          className={`tactile-btn flex flex-col justify-between gap-1 rounded-xl border p-2.5 text-left transition ${
+            rules.monopolyVictory
+              ? 'border-emerald-400/70 bg-emerald-950/55 text-amber-50 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+              : 'border-stone-700/80 bg-stone-950/60 text-stone-400 hover:border-stone-500 disabled:opacity-60'
+          }`}
+        >
+          <div className="flex w-full items-center justify-between gap-1">
+            <span className="inline-flex items-center gap-1 text-xs font-extrabold text-amber-100">
+              <Trophy className="h-3.5 w-3.5 text-amber-300" />
+              ชนะเมื่อผูกขาด
+            </span>
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[9px] font-black ${
+                rules.monopolyVictory
+                  ? 'bg-emerald-400 text-stone-950'
+                  : 'bg-stone-800 text-stone-400'
+              }`}
+            >
+              {rules.monopolyVictory ? 'เปิด' : 'ปิด'}
+            </span>
+          </div>
+          <p className="text-[10px] leading-snug text-stone-300">
+            ครองครบ 3 กลุ่มสี หรือครบ 5 โรงแรมใหญ่ ชนะเกมทันที
+          </p>
+        </button>
+
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={() => onChange({ ...rules, hostileTakeover: !rules.hostileTakeover })}
+          className={`tactile-btn flex flex-col justify-between gap-1 rounded-xl border p-2.5 text-left transition ${
+            rules.hostileTakeover
+              ? 'border-amber-400/75 bg-amber-950/55 text-amber-50 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
+              : 'border-stone-700/80 bg-stone-950/60 text-stone-400 hover:border-stone-500 disabled:opacity-60'
+          }`}
+        >
+          <div className="flex w-full items-center justify-between gap-1">
+            <span className="inline-flex items-center gap-1 text-xs font-extrabold text-amber-100">
+              <Zap className="h-3.5 w-3.5 text-amber-300" />
+              ซื้อฮุบที่ดิน 2×
+            </span>
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[9px] font-black ${
+                rules.hostileTakeover
+                  ? 'bg-amber-400 text-stone-950'
+                  : 'bg-stone-800 text-stone-400'
+              }`}
+            >
+              {rules.hostileTakeover ? 'เปิด' : 'ปิด'}
+            </span>
+          </div>
+          <p className="text-[10px] leading-snug text-stone-300">
+            เมื่อตกที่ดินคู่แข่งที่ยังไม่มีโรงแรม จ่าย 2× ซื้อโฉนดต่อได้ทันที
+          </p>
+        </button>
+
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={() => onChange({ ...rules, escalatingRent: !rules.escalatingRent })}
+          className={`tactile-btn flex flex-col justify-between gap-1 rounded-xl border p-2.5 text-left transition ${
+            rules.escalatingRent
+              ? 'border-orange-400/75 bg-orange-950/55 text-amber-50 shadow-[0_0_12px_rgba(249,115,22,0.2)]'
+              : 'border-stone-700/80 bg-stone-950/60 text-stone-400 hover:border-stone-500 disabled:opacity-60'
+          }`}
+        >
+          <div className="flex w-full items-center justify-between gap-1">
+            <span className="inline-flex items-center gap-1 text-xs font-extrabold text-amber-100">
+              <Flame className="h-3.5 w-3.5 text-orange-400" />
+              ค่าเช่าทวีคูณ
+            </span>
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[9px] font-black ${
+                rules.escalatingRent
+                  ? 'bg-orange-400 text-stone-950'
+                  : 'bg-stone-800 text-stone-400'
+              }`}
+            >
+              {rules.escalatingRent ? 'เปิด' : 'ปิด'}
+            </span>
+          </div>
+          <p className="text-[10px] leading-snug text-stone-300">
+            รอบที่ 15+ ค่าเช่า ×1.5 และรอบที่ 25+ ค่าเช่า ×2.0 เร่งเกมสนุกขึ้น
+          </p>
+        </button>
+      </div>
+
+      {/* Live Visual Rule & Victory Preview Card */}
+      <div className="rounded-xl border border-amber-300/30 bg-gradient-to-r from-[#17281e]/95 via-[#1b1610]/95 to-[#17281e]/95 p-3">
+        <div className="flex items-center justify-between gap-2 text-[11px] font-extrabold text-amber-200">
+          <span>ตัวอย่างเงื่อนไขชนะและกติกาของห้องนี้</span>
+          <span className="rounded-full border border-emerald-400/40 bg-emerald-950/80 px-2 py-0.5 text-[9.5px] font-bold text-emerald-300">
+            อัปเดตสด
+          </span>
+        </div>
+
+        <div className="mt-2 grid grid-cols-1 gap-1.5 text-[11px] sm:grid-cols-2">
+          <div className="flex items-start gap-2 rounded-lg border border-white/10 bg-black/35 px-2.5 py-1.5">
+            <Crown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+            <div>
+              <div className="font-bold text-amber-100">ชนะด้วยการอยู่รอดคนสุดท้าย</div>
+              <div className="text-[10px] text-stone-400">
+                เมื่อผู้เล่นคนอื่นล้มละลายหมด เศรษฐีคนสุดท้ายชนะทันที
+              </div>
+            </div>
+          </div>
+
+          <div
+            className={`flex items-start gap-2 rounded-lg border px-2.5 py-1.5 ${
+              rules.maxRounds
+                ? 'border-amber-400/40 bg-amber-950/35'
+                : 'border-white/5 bg-black/20 opacity-60'
+            }`}
+          >
+            <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+            <div>
+              <div className="font-bold text-amber-100">
+                {rules.maxRounds
+                  ? `ตัดสินเมื่อครบ ${rules.maxRounds} รอบ`
+                  : 'ไม่จำกัดจำนวนรอบ'}
+              </div>
+              <div className="text-[10px] text-stone-300">
+                {rules.maxRounds
+                  ? 'เมื่อครบกำหนด ผู้ที่มีมูลค่าทรัพย์สินสุทธิสูงสุดชนะทันที'
+                  : 'เล่นต่อเนื่องจนกว่าจะมีผู้ชนะตามเงื่อนไขอื่น'}
+              </div>
+            </div>
+          </div>
+
+          <div
+            className={`flex items-start gap-2 rounded-lg border px-2.5 py-1.5 ${
+              rules.monopolyVictory
+                ? 'border-emerald-400/40 bg-emerald-950/35'
+                : 'border-white/5 bg-black/20 opacity-60'
+            }`}
+          >
+            <Trophy className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />
+            <div>
+              <div className="font-bold text-amber-100">
+                {rules.monopolyVictory
+                  ? 'ชนะทันที: ครบ 3 สี หรือ 5 โรงแรมใหญ่'
+                  : 'ปิดการชนะด้วยผูกขาด'}
+              </div>
+              <div className="text-[10px] text-stone-300">
+                {rules.monopolyVictory
+                  ? 'สะสมโฉนดครบ 3 กลุ่มสี หรือครบทั้ง 5 โรงแรมใหญ่เพื่อชนะทันที'
+                  : 'การสะสมครบสีใช้เพื่อเพิ่มค่าเช่า ×2 และสร้างบ้านตามปกติ'}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2 rounded-lg border border-white/10 bg-black/35 px-2.5 py-1.5">
+            <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 text-orange-300" />
+            <div>
+              <div className="font-bold text-amber-100">
+                กลเกมบนกระดาน:{' '}
+                {rules.hostileTakeover && rules.escalatingRent
+                  ? 'เทคโอเวอร์ 2× + ค่าเช่าทวีคูณ'
+                  : rules.hostileTakeover
+                    ? 'เทคโอเวอร์ 2×'
+                    : rules.escalatingRent
+                      ? 'ค่าเช่าทวีคูณ'
+                      : 'กติกาคลาสสิกมาตรฐาน'}
+              </div>
+              <div className="text-[10px] text-stone-300">
+                {rules.hostileTakeover ? 'ซื้อฮุบที่ดินคู่แข่งได้ในราคา 2× • ' : ''}
+                {rules.escalatingRent ? 'ค่าเช่า ×1.5 (รอบ 15+) / ×2.0 (รอบ 25+)' : 'อัตราค่าเช่าคงที่'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function LobbyView({
@@ -118,6 +390,12 @@ export function LobbyView({
   const [joinCode, setJoinCode] = useState(deepLinkRoomCode ?? '');
   const [createSeats, setCreateSeats] = useState<2 | 3 | 4 | 5 | 6 | 7 | 8>(4);
   const [createPreset, setCreatePreset] = useState<'mixed' | 'allBots' | 'allHumans'>('mixed');
+  const [selectedMapTheme, setSelectedMapTheme] = useState<BoardMapTheme>(DEFAULT_BOARD_MAP_THEME);
+  const [selectedTokenId, setSelectedTokenId] = useState<number>(0);
+  const [selectedRules, setSelectedRules] = useState<GameRulesConfig>(() => ({
+    ...DEFAULT_GAME_RULES,
+  }));
+  const [previewFocusMode, setPreviewFocusMode] = useState<LobbyPreviewFocus>('character');
   const [busy, setBusy] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -134,7 +412,17 @@ export function LobbyView({
     if (busy) return;
     setBusy(true);
     try {
-      await onCreateRoom(playerName, buildDefaultConfig(createSeats, createPreset, true));
+      await onCreateRoom(
+        playerName,
+        buildDefaultConfig(
+          createSeats,
+          createPreset,
+          true,
+          selectedMapTheme,
+          selectedTokenId,
+          selectedRules,
+        ),
+      );
     } finally {
       setBusy(false);
     }
@@ -143,7 +431,17 @@ export function LobbyView({
   const handleStartLocal = () => {
     if (busy) return;
     const localPreset = createPreset === 'allHumans' ? 'mixed' : createPreset;
-    onStartLocalGame(playerName, buildDefaultConfig(createSeats, localPreset, false));
+    onStartLocalGame(
+      playerName,
+      buildDefaultConfig(
+        createSeats,
+        localPreset,
+        false,
+        selectedMapTheme,
+        selectedTokenId,
+        selectedRules,
+      ),
+    );
   };
 
   const handleJoin = async (asSpectator = false) => {
@@ -151,7 +449,7 @@ export function LobbyView({
     if (busy || !isConnected || normalizedCode.length < 4) return;
     setBusy(true);
     try {
-      await onJoinRoom(normalizedCode, playerName, undefined, asSpectator);
+      await onJoinRoom(normalizedCode, playerName, undefined, asSpectator, selectedTokenId);
     } finally {
       setBusy(false);
     }
@@ -185,27 +483,80 @@ export function LobbyView({
     if (!roomState || !isHost) return;
     const slots: PlayerSlotConfig[] = Array.from({ length: nextCount }, (_, idx) => {
       const existing = roomState.config.slots[idx];
-      if (existing) return existing;
+      const existingSeat = roomState.seats[idx];
+      if (existing) {
+        return {
+          ...existing,
+          tokenId: existingSeat?.tokenId ?? existing.tokenId ?? idx % TOKEN_NAMES.length,
+        };
+      }
       return {
         seatIndex: idx,
         kind: 'bot',
         name: BOT_DEFAULT_NAMES[idx % BOT_DEFAULT_NAMES.length],
         botStyle: 'balanced',
+        tokenId: idx % TOKEN_NAMES.length,
       };
     });
-    void onUpdateRoomConfig({ totalSeats: nextCount, slots });
+    void onUpdateRoomConfig({
+      totalSeats: nextCount,
+      mapTheme: roomState.config.mapTheme ?? DEFAULT_BOARD_MAP_THEME,
+      rules: normalizeGameRules(roomState.config.rules),
+      slots,
+    });
+  };
+
+  const applyRoomMapTheme = (mapTheme: BoardMapTheme) => {
+    if (!roomState || !isHost) return;
+    const slots: PlayerSlotConfig[] = roomState.seats.map((seat) => ({
+      seatIndex: seat.seatIndex,
+      kind: seat.kind,
+      name: seat.name,
+      botStyle: seat.kind === 'bot' ? seat.botStyle : undefined,
+      tokenId: seat.tokenId,
+    }));
+    void onUpdateRoomConfig({
+      totalSeats: roomState.config.totalSeats,
+      mapTheme,
+      rules: normalizeGameRules(roomState.config.rules),
+      slots,
+    });
+  };
+
+  const applyRoomRules = (rules: GameRulesConfig) => {
+    if (!roomState || !isHost) return;
+    const slots: PlayerSlotConfig[] = roomState.seats.map((seat) => ({
+      seatIndex: seat.seatIndex,
+      kind: seat.kind,
+      name: seat.name,
+      botStyle: seat.kind === 'bot' ? seat.botStyle : undefined,
+      tokenId: seat.tokenId,
+    }));
+    void onUpdateRoomConfig({
+      totalSeats: roomState.config.totalSeats,
+      mapTheme: roomState.config.mapTheme ?? DEFAULT_BOARD_MAP_THEME,
+      rules: normalizeGameRules(rules),
+      slots,
+    });
   };
 
   const updateSingleSlot = (seatIndex: number, patch: Partial<PlayerSlotConfig>) => {
     if (!roomState || !isHost) return;
     const slots: PlayerSlotConfig[] = Array.from({ length: roomState.config.totalSeats }, (_, idx) => {
+      const seat = roomState.seats[idx];
       const base: PlayerSlotConfig = roomState.config.slots[idx] ?? {
         seatIndex: idx,
-        kind: 'bot',
-        name: BOT_DEFAULT_NAMES[idx % BOT_DEFAULT_NAMES.length],
-        botStyle: 'balanced',
+        kind: seat?.kind ?? 'bot',
+        name: seat?.name ?? BOT_DEFAULT_NAMES[idx % BOT_DEFAULT_NAMES.length],
+        botStyle: seat?.botStyle ?? 'balanced',
+        tokenId: seat?.tokenId ?? idx % TOKEN_NAMES.length,
       };
-      if (idx !== seatIndex) return base;
+      if (idx !== seatIndex) {
+        return {
+          ...base,
+          tokenId: seat?.tokenId ?? base.tokenId ?? idx % TOKEN_NAMES.length,
+        };
+      }
       const nextKind = patch.kind ?? base.kind;
       return {
         ...base,
@@ -219,14 +570,29 @@ export function LobbyView({
               ? base.name || BOT_DEFAULT_NAMES[idx % BOT_DEFAULT_NAMES.length]
               : undefined,
         botStyle: nextKind === 'bot' ? (patch.botStyle ?? base.botStyle ?? 'balanced') : undefined,
+        tokenId: patch.tokenId ?? seat?.tokenId ?? base.tokenId ?? idx % TOKEN_NAMES.length,
       };
     });
-    void onUpdateRoomConfig({ totalSeats: roomState.config.totalSeats, slots });
+    void onUpdateRoomConfig({
+      totalSeats: roomState.config.totalSeats,
+      mapTheme: roomState.config.mapTheme ?? DEFAULT_BOARD_MAP_THEME,
+      rules: normalizeGameRules(roomState.config.rules),
+      slots,
+    });
   };
 
   const setAllBotsMode = () => {
     if (!roomState || !isHost) return;
-    void onUpdateRoomConfig(buildDefaultConfig(roomState.config.totalSeats, 'allBots'));
+    void onUpdateRoomConfig(
+      buildDefaultConfig(
+        roomState.config.totalSeats,
+        'allBots',
+        false,
+        roomState.config.mapTheme ?? DEFAULT_BOARD_MAP_THEME,
+        0,
+        normalizeGameRules(roomState.config.rules),
+      ),
+    );
   };
 
   // Screen 1: No room yet — Vintage Velvet & Brass Salon Console
@@ -366,7 +732,7 @@ export function LobbyView({
                       {[
                         { id: 'mixed', label: 'คน + บอท' },
                         { id: 'allHumans', label: 'ผู้เล่นล้วน' },
-                        { id: 'allBots', label: 'บอทล้วน (ชม)' },
+                        { id: 'allBots', label: 'บอทล้วน' },
                       ].map((opt) => (
                         <button
                           key={opt.id}
@@ -383,6 +749,102 @@ export function LobbyView({
                       ))}
                     </div>
                   </div>
+
+                  {/* Live 3D Interactive Preview of Selected Character & Map */}
+                  <Lobby3DPreview
+                    mapTheme={selectedMapTheme}
+                    tokenId={selectedTokenId}
+                    playerColor={PLAYER_COLORS[selectedTokenId % PLAYER_COLORS.length]!}
+                    focusMode={previewFocusMode}
+                    onChangeFocusMode={setPreviewFocusMode}
+                  />
+
+                  {/* Character Pawn Picker */}
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-amber-200/85 uppercase">
+                        <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                        เลือกตัวละครหมากของคุณ
+                      </span>
+                      <span className="text-xs font-bold text-emerald-300">
+                        {TOKEN_NAMES[selectedTokenId]}
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-6">
+                      {TOKEN_NAMES.map((tName, idx) => {
+                        const active = selectedTokenId === idx;
+                        return (
+                          <button
+                            key={tName}
+                            type="button"
+                            onClick={() => {
+                              setSelectedTokenId(idx);
+                              setPreviewFocusMode('character');
+                            }}
+                            className={`tactile-btn flex flex-col items-center gap-1 rounded-xl border p-1.5 text-center transition ${
+                              active
+                                ? 'border-emerald-400 bg-emerald-950/60 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
+                                : 'border-amber-400/20 bg-black/35 hover:border-amber-300/45 hover:bg-white/5'
+                            }`}
+                          >
+                            <PlayerToken
+                              tokenId={idx}
+                              color={PLAYER_COLORS[idx % PLAYER_COLORS.length]!}
+                              size={32}
+                            />
+                            <span className="line-clamp-1 text-[10px] font-bold text-amber-100">
+                              {tName}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Surrounding Map Theme Selector */}
+                  <div>
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-amber-200/85 uppercase">
+                      <MapIcon className="h-3.5 w-3.5 text-amber-300" />
+                      เลือกฉากแผนที่รอบกระดาน
+                    </span>
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {BOARD_MAP_THEMES.map((theme) => {
+                        const active = selectedMapTheme === theme.id;
+                        return (
+                          <button
+                            key={theme.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedMapTheme(theme.id);
+                              setPreviewFocusMode('map');
+                            }}
+                            className={`tactile-btn flex items-start gap-2.5 rounded-xl border p-2.5 text-left transition ${
+                              active
+                                ? 'border-amber-300 bg-amber-950/55 shadow-[0_0_14px_rgba(245,158,11,0.25)]'
+                                : 'border-amber-400/20 bg-black/35 hover:border-amber-300/40 hover:bg-white/5'
+                            }`}
+                          >
+                            <span className="mt-0.5 flex h-6 shrink-0 items-center justify-center rounded-md border border-amber-300/35 bg-black/50 px-1.5 text-[10px] font-bold text-amber-200">
+                              {theme.badge}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="truncate text-xs font-extrabold text-amber-100">
+                                {theme.name}
+                              </div>
+                              <div className="line-clamp-1 text-[10px] text-stone-300">
+                                {theme.subtitle}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {/* Game Rules & Live Victory Condition Preview */}
+                  <GameRulesConfigurator
+                    rules={selectedRules}
+                    onChange={setSelectedRules}
+                  />
                 </div>
 
                 <div className="grid gap-2.5 sm:grid-cols-2">
@@ -403,7 +865,7 @@ export function LobbyView({
                     className="tactile-btn flex items-center justify-center gap-2 rounded-xl border border-amber-300/45 bg-gradient-to-b from-[#9c691e] to-[#6e460f] px-4 py-3 text-sm font-extrabold text-amber-50 shadow-lg hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Bot className="h-4 w-4 shrink-0" />
-                    <span>เล่นทันที (AI บอท)</span>
+                    <span>เล่นทันทีกับบอท</span>
                   </button>
                 </div>
               </div>
@@ -428,7 +890,7 @@ export function LobbyView({
                       htmlFor="lobby-room-code"
                       className="text-[11px] font-bold tracking-wider text-amber-200/75 uppercase"
                     >
-                      รหัสห้อง (Room Code)
+                      รหัสห้องเชิญ
                     </label>
                     <input
                       id="lobby-room-code"
@@ -545,12 +1007,12 @@ export function LobbyView({
           <div className="flex flex-col justify-between gap-4 border-b border-amber-400/15 pb-4 sm:flex-row sm:items-center">
             <div>
               <h2 className="font-[var(--font-display)] text-lg font-bold text-amber-100">
-                ตั้งค่าที่นั่ง & ตัวเดิน (2–8 ที่นั่ง)
+                ตั้งค่าที่นั่ง & ตัวเดิน
               </h2>
               <p className="text-xs text-stone-400">
                 {isHost
                   ? 'เปลี่ยนจำนวนที่นั่ง สลับระหว่างผู้เล่นจริงกับ AI บอท และเลือกสไตล์บอทได้ทุกช่อง'
-                  : 'คลิกที่นั่ง "ผู้เล่นจริง" ที่ยังว่างเพื่อเปลี่ยนตัวเดินและสีของคุณ'}
+                  : 'คลิกที่นั่งผู้เล่นจริงที่ยังว่างเพื่อเปลี่ยนตัวเดินและสีของคุณ'}
               </p>
             </div>
 
@@ -600,6 +1062,122 @@ export function LobbyView({
                 ตอนนี้ไม่มีที่นั่งผู้เล่นจริงว่าง — หากต้องการให้เพื่อนเพิ่มเข้าเล่น กรุณากด "เปลี่ยนเป็นคน" ในช่อง AI บอทด้านล่าง
               </div>
             )}
+
+          {/* Live 3D Preview + Map Theme Selector & Character Picker in Waiting Room */}
+          <div className="mt-4 space-y-3 rounded-xl border border-amber-400/20 bg-black/30 p-3.5">
+            <Lobby3DPreview
+              mapTheme={roomState.config.mapTheme ?? DEFAULT_BOARD_MAP_THEME}
+              tokenId={mySeat ? mySeat.tokenId : selectedTokenId}
+              playerColor={
+                mySeat?.color ||
+                PLAYER_COLORS[(mySeat ? mySeat.seatIndex : selectedTokenId) % PLAYER_COLORS.length]!
+              }
+              focusMode={previewFocusMode}
+              onChangeFocusMode={setPreviewFocusMode}
+              compact
+            />
+
+            <div className="grid gap-3 lg:grid-cols-2">
+              {/* Map Theme Selector (Host editable, Guests view) */}
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-200">
+                    <MapIcon className="h-4 w-4 text-amber-300" />
+                    เลือกฉากแผนที่รอบกระดาน
+                  </span>
+                  {!isHost && (
+                    <span className="text-[11px] text-stone-400">เจ้าบ้านเป็นผู้เลือกฉาก</span>
+                  )}
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                  {BOARD_MAP_THEMES.map((theme) => {
+                    const activeTheme = roomState.config.mapTheme ?? DEFAULT_BOARD_MAP_THEME;
+                    const active = activeTheme === theme.id;
+                    return (
+                      <button
+                        key={theme.id}
+                        type="button"
+                        disabled={!isHost}
+                        onClick={() => {
+                          applyRoomMapTheme(theme.id);
+                          setPreviewFocusMode('map');
+                        }}
+                        className={`tactile-btn flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition ${
+                          active
+                            ? 'border-amber-300 bg-amber-950/60 text-amber-50 shadow'
+                            : 'border-amber-400/15 bg-black/35 text-stone-300 hover:bg-white/5 disabled:opacity-60'
+                        }`}
+                      >
+                        <span className="shrink-0 rounded border border-amber-300/35 bg-black/50 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+                          {theme.badge}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-bold">{theme.name}</div>
+                          <div className="truncate text-[10px] text-stone-400">{theme.subtitle}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Seated Player's Personal Character Picker */}
+              {mySeat && (
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-200">
+                      <Sparkles className="h-4 w-4 text-emerald-300" />
+                      เลือกตัวละครของคุณ
+                    </span>
+                    <span className="text-xs font-extrabold text-emerald-300">
+                      {TOKEN_NAMES[mySeat.tokenId % TOKEN_NAMES.length]}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-6 gap-1">
+                    {TOKEN_NAMES.map((tName, idx) => {
+                      const isCurrent = mySeat.tokenId % TOKEN_NAMES.length === idx;
+                      return (
+                        <button
+                          key={tName}
+                          type="button"
+                          title={tName}
+                          onClick={() => {
+                            setSelectedTokenId(idx);
+                            setPreviewFocusMode('character');
+                            if (isHost) {
+                              updateSingleSlot(mySeat.seatIndex, { tokenId: idx });
+                            } else {
+                              void onSelectSeat(mySeat.seatIndex, mySeat.name || playerName, idx);
+                            }
+                          }}
+                          className={`tactile-btn flex flex-col items-center rounded-lg border p-1 transition ${
+                            isCurrent
+                              ? 'border-emerald-400 bg-emerald-950/70 shadow'
+                              : 'border-amber-400/15 bg-black/35 hover:border-amber-300/40'
+                          }`}
+                        >
+                          <PlayerToken
+                            tokenId={idx}
+                            color={mySeat.color || PLAYER_COLORS[mySeat.seatIndex % PLAYER_COLORS.length]!}
+                            size={26}
+                          />
+                          <span className="mt-0.5 max-w-full truncate text-[9px] font-bold text-amber-100">
+                            {tName}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <GameRulesConfigurator
+              rules={normalizeGameRules(roomState.config.rules)}
+              readOnly={!isHost}
+              onChange={applyRoomRules}
+            />
+          </div>
 
           {/* Seat Grid */}
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -703,6 +1281,22 @@ export function LobbyView({
                                 </option>
                               ))}
                             </select>
+                            <select
+                              value={seat.tokenId % TOKEN_NAMES.length}
+                              onChange={(e) =>
+                                updateSingleSlot(seat.seatIndex, {
+                                  tokenId: Number(e.target.value),
+                                })
+                              }
+                              aria-label={`ตัวละครของบอทที่นั่ง ${seat.seatIndex + 1}`}
+                              className="w-full rounded-lg border border-amber-400/25 bg-stone-900 px-2.5 py-1.5 text-base font-semibold text-amber-100 focus:border-amber-300 focus:outline-none sm:text-xs"
+                            >
+                              {TOKEN_NAMES.map((tName, tIdx) => (
+                                <option key={tName} value={tIdx}>
+                                  ตัวละคร: {tName}
+                                </option>
+                              ))}
+                            </select>
                           </>
                         ) : (
                           <div className="rounded-lg bg-black/40 px-3 py-2 text-sm font-bold text-amber-100">
@@ -745,10 +1339,10 @@ export function LobbyView({
                     {canClaimSeat && (
                       <button
                         type="button"
-                        onClick={() => void onSelectSeat(seat.seatIndex, playerName)}
+                        onClick={() => void onSelectSeat(seat.seatIndex, playerName, selectedTokenId)}
                         className="tactile-btn flex-1 rounded-lg border border-sky-400/50 bg-[#1a4373] px-2.5 py-1.5 text-xs font-bold text-white hover:brightness-110"
                       >
-                        เลือกตัวเดินนี้
+                        เลือกที่นั่งนี้
                       </button>
                     )}
                   </div>

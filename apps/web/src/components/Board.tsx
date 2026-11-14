@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
   getCurrentPlayer,
+  getCurrentRoundNumber,
+  getRentInflationMultiplier,
   type DiceRollResult,
   type GameState,
 } from '@super-millionaire/shared';
-import { Box, Layers, LocateFixed, RotateCcw } from 'lucide-react';
+import { Box, Flame, Layers, LocateFixed, RotateCcw } from 'lucide-react';
 import { SuperMillionaire3DScene } from '../three/SuperMillionaire3DScene';
 
 export interface RecentlyBuiltFx {
@@ -62,6 +64,9 @@ export function Board({
   activeCardDraw = null,
 }: BoardProps) {
   const currentPlayer = getCurrentPlayer(gameState);
+  const currentRound = getCurrentRoundNumber(gameState);
+  const rentMultiplier = getRentInflationMultiplier(gameState);
+  const maxRounds = gameState.rules?.maxRounds ?? null;
   const hasOwnPawn = Boolean(myPlayerId && !isSpectator);
   const [cameraMode, setCameraMode] = useState<'isometric' | 'topdown'>('isometric');
   const [followMode, setFollowMode] = useState<'owner' | 'off'>(() =>
@@ -120,30 +125,43 @@ export function Board({
         {/* Top Floating Bar: Turn Chip + Unified Segmented Camera Controls */}
         <div className="pointer-events-none absolute inset-x-2.5 top-2.5 z-20 flex items-center justify-between gap-2 sm:inset-x-3.5 sm:top-3">
           {/* Active Turn Chip */}
-          <div className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-stone-950/82 px-2.5 py-1 text-[11px] font-semibold text-amber-100 shadow-lg backdrop-blur-md sm:px-3 sm:text-xs">
-            <span
-              className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/60"
-              style={{ backgroundColor: currentPlayer?.color ?? '#E3BE3B' }}
-            />
-            <span className="max-w-[160px] truncate sm:max-w-[230px]">
-              {gameState.phase === 'TURN_ORDER_ROLL' ? (
-                <>
-                  จัดลำดับรอบ{' '}
-                  <span className="mono-num font-bold text-amber-300">
-                    {gameState.turnOrder?.round ?? 1}
-                  </span>{' '}
-                  • {currentPlayer?.name}
-                </>
-              ) : (
-                <>
-                  ตาที่{' '}
-                  <span className="mono-num font-bold text-amber-300">
-                    {gameState.turnNumber}
-                  </span>{' '}
-                  • {currentPlayer?.name}
-                </>
-              )}
-            </span>
+          <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
+            <div className="flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-stone-950/82 px-2.5 py-1 text-[11px] font-semibold text-amber-100 shadow-lg backdrop-blur-md sm:px-3 sm:text-xs">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full border border-white/60"
+                style={{ backgroundColor: currentPlayer?.color ?? '#E3BE3B' }}
+              />
+              <span className="max-w-[180px] truncate sm:max-w-[260px]">
+                {gameState.phase === 'TURN_ORDER_ROLL' ? (
+                  <>
+                    จัดลำดับรอบ{' '}
+                    <span className="mono-num font-bold text-amber-300">
+                      {gameState.turnOrder?.round ?? 1}
+                    </span>{' '}
+                    • {currentPlayer?.name}
+                  </>
+                ) : (
+                  <>
+                    รอบที่{' '}
+                    <span className="mono-num font-bold text-amber-300">
+                      {maxRounds ? `${currentRound}/${maxRounds}` : currentRound}
+                    </span>{' '}
+                    • ตาที่{' '}
+                    <span className="mono-num font-bold text-amber-300">
+                      {gameState.turnNumber}
+                    </span>{' '}
+                    • {currentPlayer?.name}
+                  </>
+                )}
+              </span>
+            </div>
+
+            {rentMultiplier > 1 && (
+              <div className="inline-flex items-center gap-1 rounded-full border border-orange-400/60 bg-orange-950/88 px-2.5 py-1 text-[11px] font-extrabold text-amber-200 shadow-lg backdrop-blur-md">
+                <Flame className="h-3.5 w-3.5 text-orange-400" />
+                <span className="mono-num">ค่าเช่า ×{rentMultiplier}</span>
+              </div>
+            )}
           </div>
 
           {/* Unified Segmented Camera Bar */}
@@ -187,10 +205,10 @@ export function Board({
                     ? 'bg-amber-500/90 text-stone-950'
                     : 'text-amber-200/90 hover:bg-stone-800/80 hover:text-amber-100'
                 }`}
-                title="หมุนกระดานหันมาโฟกัสเฉพาะตำแหน่งหมากของคุณ (ไม่หมุนตามคนอื่น)"
+                title="กล้องติดตามตามหลังตัวละครของคุณอย่างนุ่มนวลในเทิร์นของคุณ (ไม่หมุนเหวี่ยงรอบกระดาน)"
               >
                 <LocateFixed className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">ตามหมากฉัน</span>
+                <span className="hidden sm:inline">ตามหลังหมากฉัน</span>
               </button>
             )}
 
@@ -226,20 +244,28 @@ export function Board({
           </div>
         )}
 
-        {/* Dice Result Floating Badge (complements 3D tumbling dice on board) */}
+        {/* Smooth Center-Screen Dice Total Medallion (no formula text) */}
         {showThrownDiceOverlay && thrownDiceFaces && !isThrowingDice && (
           <div
-            key={`dice-pill-${throwKey}`}
-            className="pointer-events-none absolute top-13 right-3 z-20 flex items-center gap-1.5 rounded-full border border-amber-300/60 bg-stone-950/88 px-3 py-1 text-xs font-extrabold text-amber-100 shadow-lg backdrop-blur-md sm:top-12"
+            key={`dice-center-${throwKey}`}
+            className="pointer-events-none absolute inset-0 z-25 flex items-center justify-center"
           >
-            <span className="mono-num">
-              {thrownDiceFaces.die1} + {thrownDiceFaces.die2} = {thrownDiceFaces.total} แต้ม
-            </span>
-            {thrownDiceFaces.isDoubles && (
-              <span className="rounded-full bg-amber-300 px-1.5 py-0.2 text-[10px] font-black text-stone-950">
-                เบิ้ล!
-              </span>
-            )}
+            <div className="animate-dice-center-pop flex flex-col items-center">
+              <div className="relative flex h-24 w-24 flex-col items-center justify-center rounded-full border-2 border-amber-300/90 bg-[radial-gradient(circle_at_35%_25%,rgba(45,35,18,0.96),rgba(14,11,8,0.96))] shadow-[0_18px_45px_rgba(0,0,0,0.75),0_0_32px_rgba(251,191,36,0.45)] ring-4 ring-amber-400/25 backdrop-blur-md sm:h-28 sm:w-28">
+                <span className="text-[10px] font-bold tracking-widest text-amber-200/80 uppercase">
+                  {gameState.phase === 'TURN_ORDER_ROLL' ? 'แต้มจัดลำดับ' : 'เดินหน้า'}
+                </span>
+                <span className="mono-num -mt-0.5 text-4xl font-black leading-none text-amber-300 drop-shadow-[0_2px_12px_rgba(251,191,36,0.65)] sm:text-5xl">
+                  {thrownDiceFaces.total}
+                </span>
+                <span className="text-[10px] font-bold text-amber-100/75">ช่อง</span>
+              </div>
+              {thrownDiceFaces.isDoubles && (
+                <div className="-mt-2.5 rounded-full border border-amber-950 bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 px-3.5 py-0.5 text-xs font-black tracking-wide text-stone-950 shadow-lg">
+                  เบิ้ล! ทอยซ้ำได้
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

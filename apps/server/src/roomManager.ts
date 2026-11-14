@@ -1,11 +1,15 @@
 import crypto from 'node:crypto';
 import {
   BOT_DEFAULT_NAMES,
+  DEFAULT_BOARD_MAP_THEME,
   PLAYER_COLORS,
+  TOKEN_NAMES,
   applyGameAction,
   createGameState,
   decideNextBotAction,
   getCurrentPlayer,
+  normalizeGameRules,
+  type BoardMapTheme,
   type BotStyle,
   type GameAction,
   type GameState,
@@ -119,12 +123,32 @@ function normalizeBotStyle(style: unknown): BotStyle {
   return 'balanced';
 }
 
+function normalizeMapTheme(theme: unknown, fallback: BoardMapTheme = DEFAULT_BOARD_MAP_THEME): BoardMapTheme {
+  if (
+    theme === 'siam_park' ||
+    theme === 'bangkok_metro' ||
+    theme === 'tropical_island' ||
+    theme === 'royal_palace'
+  ) {
+    return theme;
+  }
+  return fallback;
+}
+
+function normalizeTokenId(tokenId: unknown, fallback: number): number {
+  if (typeof tokenId === 'number' && Number.isFinite(tokenId) && tokenId >= 0) {
+    return Math.trunc(tokenId) % TOKEN_NAMES.length;
+  }
+  return ((Math.trunc(fallback) % TOKEN_NAMES.length) + TOKEN_NAMES.length) % TOKEN_NAMES.length;
+}
+
 function buildDefaultSlotConfig(seatIndex: number, kind: 'human' | 'bot'): PlayerSlotConfig {
   return {
     seatIndex,
     kind,
     name: kind === 'bot' ? BOT_DEFAULT_NAMES[seatIndex % BOT_DEFAULT_NAMES.length]! : undefined,
     botStyle: kind === 'bot' ? 'balanced' : undefined,
+    tokenId: seatIndex % TOKEN_NAMES.length,
   };
 }
 
@@ -133,6 +157,8 @@ function cloneRoomState(room: RoomState): RoomState {
     ...room,
     config: {
       totalSeats: room.config.totalSeats,
+      mapTheme: room.config.mapTheme ?? DEFAULT_BOARD_MAP_THEME,
+      rules: normalizeGameRules(room.config.rules),
       slots: room.config.slots.map((s) => ({ ...s })),
     },
     seats: room.seats.map((s) => ({ ...s })),
@@ -239,12 +265,14 @@ export class RoomManager {
           ? BOT_DEFAULT_NAMES[i % BOT_DEFAULT_NAMES.length]!
           : `ผู้เล่น ${i + 1}`;
       const name = sanitizeName(provided?.name, defaultName);
+      const tokenId = normalizeTokenId(provided?.tokenId, i);
 
       normalizedSlots.push({
         seatIndex: i,
         kind,
         name: kind === 'bot' ? name : provided?.name,
         botStyle: kind === 'bot' ? botStyle : undefined,
+        tokenId,
       });
 
       seats.push({
@@ -255,7 +283,7 @@ export class RoomManager {
         occupiedBySocketId: null,
         playerId: kind === 'bot' ? `player-${i + 1}` : null,
         ready: kind === 'bot',
-        tokenId: i,
+        tokenId,
         color: PLAYER_COLORS[i % PLAYER_COLORS.length]!,
       });
     }
@@ -263,6 +291,7 @@ export class RoomManager {
     const roomId = this.generateUniqueRoomCode();
     const isSpectator = firstHumanSeatIndex === null;
     const hostSeatIndex = firstHumanSeatIndex ?? 0;
+    const mapTheme = normalizeMapTheme(params.config?.mapTheme);
 
     const managed: ManagedRoom = {
       room: {
@@ -270,6 +299,8 @@ export class RoomManager {
         hostSeatIndex,
         config: {
           totalSeats,
+          mapTheme,
+          rules: normalizeGameRules(params.config?.rules),
           slots: normalizedSlots,
         },
         seats,
@@ -322,6 +353,7 @@ export class RoomManager {
     roomId: string;
     playerName: string;
     preferredSeatIndex?: number;
+    preferredTokenId?: number;
     asSpectator?: boolean;
   }): JoinRoomResult {
     const roomId = normalizeRoomCode(params.roomId);
@@ -343,6 +375,17 @@ export class RoomManager {
         params.preferredSeatIndex !== tokenMatchedSeat
       ) {
         return this.moveSeatedPlayerInLobby(managed, tokenMatchedSeat, params);
+      }
+      if (managed.room.status === 'LOBBY' && params.preferredTokenId !== undefined) {
+        const seat = managed.room.seats[tokenMatchedSeat];
+        if (seat) {
+          seat.tokenId = normalizeTokenId(params.preferredTokenId, seat.tokenId);
+          managed.room.config.slots[tokenMatchedSeat] = {
+            ...managed.room.config.slots[tokenMatchedSeat]!,
+            tokenId: seat.tokenId,
+          };
+          return { ...result, room: cloneRoomState(managed.room) };
+        }
       }
       return result;
     }
@@ -403,6 +446,13 @@ export class RoomManager {
         return this.moveSeatedPlayerInLobby(managed, currentSeat, params);
       }
       const seat = managed.room.seats[currentSeat]!;
+      if (params.preferredTokenId !== undefined) {
+        seat.tokenId = normalizeTokenId(params.preferredTokenId, seat.tokenId);
+        managed.room.config.slots[currentSeat] = {
+          ...managed.room.config.slots[currentSeat]!,
+          tokenId: seat.tokenId,
+        };
+      }
       return {
         ok: true,
         roomId,
@@ -426,14 +476,21 @@ export class RoomManager {
       };
     }
 
+    const tokenId =
+      params.preferredTokenId !== undefined
+        ? normalizeTokenId(params.preferredTokenId, targetSeat.tokenId)
+        : targetSeat.tokenId;
+
     managed.spectatorSockets.delete(params.socketId);
     targetSeat.occupiedBySocketId = params.socketId;
     targetSeat.playerId = `player-${targetSeat.seatIndex + 1}`;
     targetSeat.name = trimmedName;
+    targetSeat.tokenId = tokenId;
     targetSeat.ready = managed.hostSocketId === params.socketId;
     managed.room.config.slots[targetSeat.seatIndex] = {
       ...managed.room.config.slots[targetSeat.seatIndex]!,
       name: trimmedName,
+      tokenId,
     };
     managed.seatSessionTokens.set(targetSeat.seatIndex, params.sessionToken);
     managed.socketToSeat.set(params.socketId, targetSeat.seatIndex);
@@ -530,6 +587,7 @@ export class RoomManager {
       sessionToken: string;
       playerName: string;
       preferredSeatIndex?: number;
+      preferredTokenId?: number;
     },
   ): JoinRoomResult {
     const targetSeat = this.pickAvailableHumanSeat(managed.room, params.preferredSeatIndex);
@@ -539,6 +597,10 @@ export class RoomManager {
 
     const oldSeat = managed.room.seats[fromSeatIndex]!;
     const playerName = oldSeat.name || sanitizeName(params.playerName, 'ผู้เล่น');
+    const tokenId =
+      params.preferredTokenId !== undefined
+        ? normalizeTokenId(params.preferredTokenId, oldSeat.tokenId)
+        : oldSeat.tokenId;
     const wasReady = oldSeat.ready;
     const wasHost =
       managed.room.hostSeatIndex === fromSeatIndex ||
@@ -549,10 +611,12 @@ export class RoomManager {
     targetSeat.occupiedBySocketId = params.socketId;
     targetSeat.playerId = `player-${targetSeat.seatIndex + 1}`;
     targetSeat.name = playerName;
+    targetSeat.tokenId = tokenId;
     targetSeat.ready = wasHost ? true : wasReady;
     managed.room.config.slots[targetSeat.seatIndex] = {
       ...managed.room.config.slots[targetSeat.seatIndex]!,
       name: playerName,
+      tokenId,
     };
     managed.seatSessionTokens.set(targetSeat.seatIndex, params.sessionToken);
     managed.socketToSeat.set(params.socketId, targetSeat.seatIndex);
@@ -669,6 +733,7 @@ export class RoomManager {
       const prevSeat = managed.room.seats[i];
       const slot = incomingSlotMap.get(i) ?? buildDefaultSlotConfig(i, 'human');
       const occupiedSocket = prevSeat?.occupiedBySocketId ?? null;
+      const tokenId = normalizeTokenId(slot.tokenId ?? prevSeat?.tokenId, i);
 
       if (occupiedSocket) {
         const preservedName = sanitizeName(prevSeat?.name, `ผู้เล่น ${i + 1}`);
@@ -676,6 +741,7 @@ export class RoomManager {
           seatIndex: i,
           kind: 'human',
           name: preservedName,
+          tokenId,
         });
         nextSeats.push({
           seatIndex: i,
@@ -685,7 +751,7 @@ export class RoomManager {
           occupiedBySocketId: occupiedSocket,
           playerId: `player-${i + 1}`,
           ready: prevSeat?.ready ?? false,
-          tokenId: i,
+          tokenId,
           color: PLAYER_COLORS[i % PLAYER_COLORS.length]!,
         });
       } else {
@@ -702,6 +768,7 @@ export class RoomManager {
           kind,
           name: kind === 'bot' ? name : slot.name,
           botStyle: kind === 'bot' ? botStyle : undefined,
+          tokenId,
         });
         nextSeats.push({
           seatIndex: i,
@@ -711,13 +778,19 @@ export class RoomManager {
           occupiedBySocketId: null,
           playerId: kind === 'bot' ? `player-${i + 1}` : null,
           ready: kind === 'bot',
-          tokenId: i,
+          tokenId,
           color: PLAYER_COLORS[i % PLAYER_COLORS.length]!,
         });
       }
     }
 
-    managed.room.config = { totalSeats, slots: nextSlots };
+    const mapTheme = normalizeMapTheme(
+      params.config.mapTheme ?? managed.room.config.mapTheme,
+    );
+    const rules = normalizeGameRules(
+      params.config.rules ?? managed.room.config.rules,
+    );
+    managed.room.config = { totalSeats, mapTheme, rules, slots: nextSlots };
     managed.room.seats = nextSeats;
     if (hostMovedToSpectator) {
       managed.room.hostSeatIndex = 0;
@@ -779,11 +852,13 @@ export class RoomManager {
 
     const finalConfig: RoomConfig = {
       totalSeats: managed.room.config.totalSeats,
+      mapTheme: managed.room.config.mapTheme ?? DEFAULT_BOARD_MAP_THEME,
       slots: managed.room.seats.map((seat) => ({
         seatIndex: seat.seatIndex,
         kind: seat.kind,
         name: seat.name,
         botStyle: seat.kind === 'bot' ? seat.botStyle : undefined,
+        tokenId: seat.tokenId,
       })),
     };
 

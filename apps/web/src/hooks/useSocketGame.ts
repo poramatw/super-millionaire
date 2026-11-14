@@ -2,13 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import {
   BOT_DEFAULT_NAMES,
+  DEFAULT_BOARD_MAP_THEME,
   PLAYER_COLORS,
+  TOKEN_NAMES,
   applyGameAction,
   createGameState,
   decideNextBotAction,
   evaluateTradeOffer,
   getCurrentPlayer,
   getRecommendedBotActionDelayMs,
+  normalizeGameRules,
   type ClientToServerEvents,
   type GameAction,
   type GameState,
@@ -153,6 +156,7 @@ function normalizeLocalConfig(
   partial?: Partial<RoomConfig>,
 ): { config: RoomConfig; humanSeatIndex: number | null } {
   const totalSeats = (partial?.totalSeats ?? 4) as 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  const mapTheme = partial?.mapTheme ?? DEFAULT_BOARD_MAP_THEME;
   const slotMap = new Map<number, PlayerSlotConfig>();
   for (const s of partial?.slots ?? []) {
     slotMap.set(s.seatIndex, s);
@@ -162,6 +166,11 @@ function normalizeLocalConfig(
   const slots: PlayerSlotConfig[] = Array.from({ length: totalSeats }, (_, idx) => {
     const existing = slotMap.get(idx);
     const kind = existing?.kind ?? (idx === 0 ? 'human' : 'bot');
+    const tokenId =
+      typeof existing?.tokenId === 'number' && Number.isFinite(existing.tokenId)
+        ? ((Math.trunc(existing.tokenId) % TOKEN_NAMES.length) + TOKEN_NAMES.length) %
+          TOKEN_NAMES.length
+        : idx % TOKEN_NAMES.length;
     if (kind === 'human' && humanSeatIndex === null) {
       humanSeatIndex = idx;
     }
@@ -171,12 +180,14 @@ function normalizeLocalConfig(
         kind: 'bot',
         name: existing?.name?.trim() || BOT_DEFAULT_NAMES[idx % BOT_DEFAULT_NAMES.length],
         botStyle: existing?.botStyle ?? 'balanced',
+        tokenId,
       };
     }
     return {
       seatIndex: idx,
       kind: 'human',
       name: idx === 0 ? playerName.trim() || 'เศรษฐีสยาม' : existing?.name || `ผู้เล่น ${idx + 1}`,
+      tokenId,
     };
   });
 
@@ -188,13 +199,19 @@ function normalizeLocalConfig(
         kind: 'bot',
         name: BOT_DEFAULT_NAMES[s.seatIndex % BOT_DEFAULT_NAMES.length],
         botStyle: 'balanced',
+        tokenId: s.tokenId,
       };
     }
     return s;
   });
 
   return {
-    config: { totalSeats, slots: normalizedSlots },
+    config: {
+      totalSeats,
+      mapTheme,
+      rules: normalizeGameRules(partial?.rules),
+      slots: normalizedSlots,
+    },
     humanSeatIndex,
   };
 }
@@ -202,6 +219,11 @@ function normalizeLocalConfig(
 function buildSeatsFromConfig(config: RoomConfig, humanSeatIndex: number | null): RoomSeat[] {
   return config.slots.map((slot) => {
     const isLocalHuman = slot.kind === 'human' && slot.seatIndex === humanSeatIndex;
+    const tokenId =
+      typeof slot.tokenId === 'number' && Number.isFinite(slot.tokenId)
+        ? ((Math.trunc(slot.tokenId) % TOKEN_NAMES.length) + TOKEN_NAMES.length) %
+          TOKEN_NAMES.length
+        : slot.seatIndex % TOKEN_NAMES.length;
     return {
       seatIndex: slot.seatIndex,
       kind: slot.kind,
@@ -214,7 +236,7 @@ function buildSeatsFromConfig(config: RoomConfig, humanSeatIndex: number | null)
       occupiedBySocketId: isLocalHuman ? 'local-browser' : null,
       playerId: `player-${slot.seatIndex + 1}`,
       ready: true,
-      tokenId: slot.seatIndex,
+      tokenId,
       color: PLAYER_COLORS[slot.seatIndex % PLAYER_COLORS.length]!,
     };
   });
@@ -243,8 +265,13 @@ export interface UseSocketGameResult {
     playerName: string,
     preferredSeatIndex?: number,
     asSpectator?: boolean,
+    preferredTokenId?: number,
   ) => Promise<RoomJoinAck>;
-  selectSeat: (seatIndex: number, playerName: string) => Promise<RoomJoinAck>;
+  selectSeat: (
+    seatIndex: number,
+    playerName: string,
+    preferredTokenId?: number,
+  ) => Promise<RoomJoinAck>;
   updateRoomConfig: (config: RoomConfig) => Promise<RoomActionAck>;
   setReady: (ready: boolean) => void;
   startGame: () => Promise<RoomActionAck>;
@@ -300,10 +327,13 @@ export function useSocketGame(): UseSocketGameResult {
       auth: {
         sessionToken: sessionTokenRef.current,
       },
-      transports: ['websocket', 'polling'] as ('websocket' | 'polling')[],
+      transports: (hasExplicitSocket ? ['websocket', 'polling'] : ['websocket']) as (
+        | 'websocket'
+        | 'polling'
+      )[],
       reconnection: hasExplicitSocket,
       reconnectionAttempts: hasExplicitSocket ? Infinity : 0,
-      timeout: hasExplicitSocket ? 8000 : 1200,
+      timeout: hasExplicitSocket ? 8000 : 1000,
       reconnectionDelay: 800,
       reconnectionDelayMax: 4000,
     };
@@ -354,6 +384,46 @@ export function useSocketGame(): UseSocketGameResult {
         socketRef.current = null;
         setTransportMode('p2p');
         setConnectionStatus('connected');
+
+        // Reclaim host room automatically if the host refreshed the page while in a room
+        const storedHostRoom = readStoredHostRoom();
+        const storedRoom = readStoredRoomId();
+        const urlRoom = readRoomCodeFromUrl();
+        const resumeHostCode =
+          storedHostRoom && (storedHostRoom === storedRoom || storedHostRoom === urlRoom)
+            ? storedHostRoom
+            : null;
+        if (resumeHostCode && !peerHostRef.current && !peerClientRef.current) {
+          const name = readStoredPlayerName() || 'เจ้าบ้าน';
+          void PeerRoomHost.create({
+            sessionToken: sessionTokenRef.current,
+            playerName: name,
+            preferredRoomId: resumeHostCode,
+            callbacks: {
+              onRoomChange: (room, entries) => {
+                setLocalRoomState(null);
+                setRoomState(room);
+                setStandaloneGameState(room.gameState);
+                if (entries && entries.length > 0) {
+                  setLastActionEntries(entries);
+                }
+              },
+              onError: (msg) => showError(msg),
+            },
+          }).then(({ host, ack }) => {
+            if (ack.ok && ack.roomId && !peerHostRef.current) {
+              peerHostRef.current = host;
+              currentRoomIdRef.current = ack.roomId;
+              creatorRoomIdRef.current = ack.roomId;
+              saveStoredHostRoom(ack.roomId);
+              saveStoredRoomId(ack.roomId);
+              syncRoomUrlParam(ack.roomId);
+              setMySeatIndex(ack.seatIndex ?? null);
+              setMyPlayerId(ack.playerId ?? null);
+              setIsSpectator(Boolean(ack.isSpectator));
+            }
+          });
+        }
       } else {
         setConnectionStatus('error');
       }
@@ -567,7 +637,14 @@ export function useSocketGame(): UseSocketGameResult {
         });
       }
 
-      if (transportMode === 'p2p') {
+      if (transportMode === 'p2p' || !getConfiguredSocketUrl()) {
+        if (socketRef.current && !socketRef.current.connected) {
+          socketRef.current.disconnect();
+          socketRef.current = null;
+        }
+        setTransportMode('p2p');
+        setConnectionStatus('connected');
+
         peerHostRef.current?.destroy();
         peerHostRef.current = null;
         peerClientRef.current?.destroy();
@@ -610,7 +687,7 @@ export function useSocketGame(): UseSocketGameResult {
         return ack;
       }
 
-      // Offline fallback if neither Socket.IO nor P2P ready yet
+      // Offline fallback if explicit Socket.IO server is configured but unreachable
       return startLocalGame(playerName, config);
     },
     [clearError, showError, startLocalGame, transportMode],
@@ -622,6 +699,7 @@ export function useSocketGame(): UseSocketGameResult {
       playerName: string,
       preferredSeatIndex?: number,
       asSpectator?: boolean,
+      preferredTokenId?: number,
     ): Promise<RoomJoinAck> => {
       const normalizedRoomId = roomId.trim().toUpperCase();
       const trimmedName = playerName.trim() || 'ผู้เล่น';
@@ -636,6 +714,7 @@ export function useSocketGame(): UseSocketGameResult {
               roomId: normalizedRoomId,
               playerName: trimmedName,
               preferredSeatIndex,
+              preferredTokenId,
               asSpectator,
             },
             (ack) => {
@@ -662,6 +741,7 @@ export function useSocketGame(): UseSocketGameResult {
           sessionToken: sessionTokenRef.current,
           playerName: trimmedName,
           preferredSeatIndex,
+          preferredTokenId,
           asSpectator,
         });
         if (ack.ok) {
@@ -679,6 +759,7 @@ export function useSocketGame(): UseSocketGameResult {
         const ack = await peerClientRef.current.sendJoin({
           playerName: trimmedName,
           preferredSeatIndex,
+          preferredTokenId,
           asSpectator,
         });
         if (ack.ok) {
@@ -692,7 +773,14 @@ export function useSocketGame(): UseSocketGameResult {
         return ack;
       }
 
-      if (transportMode === 'p2p') {
+      if (transportMode === 'p2p' || !getConfiguredSocketUrl()) {
+        if (socketRef.current && !socketRef.current.connected) {
+          socketRef.current.disconnect();
+          socketRef.current = null;
+        }
+        setTransportMode('p2p');
+        setConnectionStatus('connected');
+
         peerClientRef.current?.destroy();
         peerClientRef.current = null;
 
@@ -701,6 +789,7 @@ export function useSocketGame(): UseSocketGameResult {
           sessionToken: sessionTokenRef.current,
           playerName: trimmedName,
           preferredSeatIndex,
+          preferredTokenId,
           asSpectator,
           callbacks: {
             onState: (room, entries) => {
@@ -750,7 +839,7 @@ export function useSocketGame(): UseSocketGameResult {
   );
 
   const selectSeat = useCallback(
-    (seatIndex: number, playerName: string): Promise<RoomJoinAck> => {
+    (seatIndex: number, playerName: string, preferredTokenId?: number): Promise<RoomJoinAck> => {
       if (localRoomState) {
         return Promise.resolve({ ok: true, roomId: 'LOCAL', seatIndex });
       }
@@ -758,7 +847,7 @@ export function useSocketGame(): UseSocketGameResult {
       if (!roomId) {
         return Promise.resolve({ ok: false, error: 'ไม่พบรหัสห้อง' });
       }
-      return joinRoom(roomId, playerName, seatIndex, false);
+      return joinRoom(roomId, playerName, seatIndex, false, preferredTokenId);
     },
     [joinRoom, localRoomState, roomState?.roomId],
   );

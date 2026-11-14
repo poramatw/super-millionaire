@@ -773,7 +773,8 @@ export function renderPerimeterTiles(
         ctx.beginPath();
         ctx.rect(-hw + 3, -hh + 3, cell - 6, cell - 6);
         ctx.clip();
-        if (topOrientation === 'south' && (tile.index === 20 || tile.index === 30)) {
+        // Keep tile 20 upright for south view, while preserving tile 30's original arrow direction on the board
+        if (topOrientation === 'south' && tile.index === 20) {
           ctx.rotate(Math.PI);
         }
         ctx.drawImage(

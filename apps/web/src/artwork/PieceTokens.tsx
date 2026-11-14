@@ -1,14 +1,18 @@
 import { useId } from 'react';
 
 export const TOKEN_NAMES = [
-  'รถคลาสสิก',
-  'เรือสำเภา',
-  'ช้างศึก',
-  'ตุ๊กตุ๊ก',
-  'หมวกเศรษฐี',
-  'ถุงทอง',
-  'รถซุปเปอร์คาร์',
-  'ราชสีห์ทอง',
+  'เหมียวนำโชค',
+  'ชิบะจอมลุย',
+  'แพนด้าเจ้าสัว',
+  'ต่ายน้อยร้อยล้าน',
+  'หนุ่มน้อยนักลงทุน',
+  'สาวน้อยไฮโซ',
+  'เพนกวินทักซิโด้',
+  'จิ้งจอกจอมดีล',
+  'ลูกเจี๊ยบเศรษฐี',
+  'ช้างน้อยคู่บารมี',
+  'บาริสต้าหนุ่มชิค',
+  'คุณหนูนักช้อป',
 ] as const;
 
 export interface PlayerTokenProps {
@@ -39,7 +43,8 @@ export interface Dice3DProps {
 
 export function PlayerToken({ tokenId, color, size = 36, className = '' }: PlayerTokenProps) {
   const uid = useId().replace(/:/g, '');
-  const idx = ((Math.trunc(tokenId) % 8) + 8) % 8;
+  const count = TOKEN_NAMES.length;
+  const idx = ((Math.trunc(tokenId) % count) + count) % count;
 
   return (
     <svg
@@ -113,323 +118,226 @@ export function PlayerToken({ tokenId, color, size = 36, className = '' }: Playe
 
       {/* Upright Figurine Mounted on Pedestal Collar */}
       <g transform="translate(2.5, -1.5) scale(0.92)">
-
-      {idx === 0 && (
-        /* 0: รถคลาสสิก (Classic Vintage Roadster) */
-        <g>
-          {/* Rear & front chassis body */}
-          <path
-            d="M8 38 C8 32 13 28 19 27 L24 20 C26 18 39 18 43 22 L49 28 C55 29 58 33 58 38 L57 44 C57 46 54 47 51 47 L13 47 C10 47 8 45 8 43 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="2"
-          />
-          <path
-            d="M8 38 C8 32 13 28 19 27 L24 20 C26 18 39 18 43 22 L49 28 C55 29 58 33 58 38 L57 44 C57 46 54 47 51 47 L13 47 C10 47 8 45 8 43 Z"
-            fill={`url(#${uid}-sheen)`}
-          />
-          {/* Windshield & interior */}
-          <path
-            d="M23 28 L27 21 L41 21 L45 28 Z"
-            fill="#d9f0fa"
-            stroke="#1b1510"
-            strokeWidth="1.6"
-          />
-          <path d="M27 22 L31 22 L28 27 L25 27 Z" fill="#ffffff" opacity="0.65" />
-          {/* Hood louver & chrome trim strip */}
-          <path d="M12 37 L53 37" stroke="#fff7d6" strokeWidth="1.8" strokeLinecap="round" />
-          <rect x="51" y="32" width="5" height="9" rx="2" fill={`url(#${uid}-metal)`} stroke="#1b1510" strokeWidth="1.2" />
-          {/* Headlight & bumper */}
-          <circle cx="55" cy="34" r="3" fill="#fff8c8" stroke="#1b1510" strokeWidth="1.2" />
-          <rect x="6" y="42" width="52" height="3.5" rx="1.75" fill="#e5e0d5" stroke="#1b1510" strokeWidth="1.2" />
-          {/* Wheels */}
+        {idx === 0 && (
+          /* 0: เหมียวนำโชค (Cute Lucky Cat) */
           <g>
-            <circle cx="19" cy="46" r="7.2" fill="#231f1c" stroke="#120e0a" strokeWidth="1.5" />
-            <circle cx="19" cy="46" r="4.3" fill="#f5efe0" />
-            <circle cx="19" cy="46" r="2.2" fill={`url(#${uid}-metal)`} />
-            <circle cx="45" cy="46" r="7.2" fill="#231f1c" stroke="#120e0a" strokeWidth="1.5" />
-            <circle cx="45" cy="46" r="4.3" fill="#f5efe0" />
-            <circle cx="45" cy="46" r="2.2" fill={`url(#${uid}-metal)`} />
+            {/* Pointy ears */}
+            <path d="M18 28 L19 14 L28 21 Z" fill="#fff6e8" stroke="#1b1510" strokeWidth="1.8" strokeLinejoin="round" />
+            <path d="M20.5 25 L21 17.5 L26 22 Z" fill="#f58fa8" />
+            <path d="M46 28 L45 14 L36 21 Z" fill="#fff6e8" stroke="#1b1510" strokeWidth="1.8" strokeLinejoin="round" />
+            <path d="M43.5 25 L43 17.5 L38 22 Z" fill="#f58fa8" />
+            {/* Chubby body & head */}
+            <rect x="20" y="36" width="24" height="15" rx="7" fill="#fff6e8" stroke="#1b1510" strokeWidth="1.8" />
+            <rect x="16" y="19" width="32" height="23" rx="11" fill="#fff6e8" stroke="#1b1510" strokeWidth="1.9" />
+            {/* Collar & golden bell */}
+            <rect x="21" y="39" width="22" height="3.6" rx="1.8" fill={color} stroke="#1b1510" strokeWidth="1.2" />
+            <circle cx="32" cy="42.5" r="3" fill={`url(#${uid}-metal)`} stroke="#1b1510" strokeWidth="1.1" />
+            {/* Eyes, pink cheeks, whiskers */}
+            <circle cx="25" cy="30" r="2.3" fill="#1b1510" />
+            <circle cx="25.7" cy="29.2" r="0.8" fill="#ffffff" />
+            <circle cx="39" cy="30" r="2.3" fill="#1b1510" />
+            <circle cx="39.7" cy="29.2" r="0.8" fill="#ffffff" />
+            <ellipse cx="21" cy="33.5" rx="2.6" ry="1.5" fill="#f79bb4" opacity="0.75" />
+            <ellipse cx="43" cy="33.5" rx="2.6" ry="1.5" fill="#f79bb4" opacity="0.75" />
+            <path d="M30 33 L32 35 L34 33" stroke="#1b1510" strokeWidth="1.5" strokeLinecap="round" fill="none" />
           </g>
-        </g>
-      )}
+        )}
 
-      {idx === 1 && (
-        /* 1: เรือสำเภา (Royal Thai-Chinese Junk / Galleon) */
-        <g>
-          {/* Main & fore masts */}
-          <line x1="33" y1="9" x2="33" y2="43" stroke="#3b2613" strokeWidth="2.6" strokeLinecap="round" />
-          <line x1="20" y1="16" x2="20" y2="43" stroke="#3b2613" strokeWidth="2.1" strokeLinecap="round" />
-          {/* Rear sail */}
-          <path
-            d="M21 17 C27 16 31 18 32 22 C31 28 30 33 29 36 L16 35 C17 29 19 22 21 17 Z"
-            fill="#faf1d6"
-            stroke="#1b1510"
-            strokeWidth="1.5"
-          />
-          {/* Main billowing junk sail */}
-          <path
-            d="M34 11 C44 12 51 17 52 25 C50 32 48 36 45 38 L31 37 C32 28 33 19 34 11 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="1.8"
-          />
-          <path
-            d="M34 11 C44 12 51 17 52 25 C50 32 48 36 45 38 L31 37 C32 28 33 19 34 11 Z"
-            fill={`url(#${uid}-sheen)`}
-          />
-          {/* Sail battens */}
-          <path d="M33 18 L49 19 M32 25 L51 26 M32 32 L48 33" stroke="#3b2613" strokeWidth="1.2" opacity="0.7" />
-          {/* Pennant flag */}
-          <path d="M33 9 L42 11 L33 13 Z" fill={`url(#${uid}-metal)`} stroke="#1b1510" strokeWidth="1" />
-          {/* Hull */}
-          <path
-            d="M9 37 C17 40 43 40 55 34 L50 49 C45 52 20 52 14 48 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="2"
-          />
-          <path
-            d="M9 37 C17 40 43 40 55 34 L50 49 C45 52 20 52 14 48 Z"
-            fill={`url(#${uid}-sheen)`}
-          />
-          <path d="M12 42 C24 44 42 43 52 39" stroke={`url(#${uid}-metal)`} strokeWidth="2.2" fill="none" />
-          {/* Portholes */}
-          <circle cx="23" cy="46" r="1.7" fill="#fff7d6" stroke="#1b1510" strokeWidth="0.9" />
-          <circle cx="32" cy="46" r="1.7" fill="#fff7d6" stroke="#1b1510" strokeWidth="0.9" />
-          <circle cx="41" cy="45.5" r="1.7" fill="#fff7d6" stroke="#1b1510" strokeWidth="0.9" />
-        </g>
-      )}
+        {idx === 1 && (
+          /* 1: ชิบะจอมลุย (Cute Shiba Inu) */
+          <g>
+            {/* Ears */}
+            <path d="M18 26 L17 13 L27 20 Z" fill="#e6923a" stroke="#1b1510" strokeWidth="1.8" strokeLinejoin="round" />
+            <path d="M46 26 L47 13 L37 20 Z" fill="#e6923a" stroke="#1b1510" strokeWidth="1.8" strokeLinejoin="round" />
+            {/* Body & head */}
+            <rect x="20" y="36" width="24" height="15" rx="7" fill="#e6923a" stroke="#1b1510" strokeWidth="1.8" />
+            <rect x="16" y="18" width="32" height="24" rx="11" fill="#e6923a" stroke="#1b1510" strokeWidth="1.9" />
+            {/* Cream snout & eyebrows */}
+            <ellipse cx="32" cy="35" rx="10" ry="6.2" fill="#fff7e8" />
+            <circle cx="26.5" cy="25" r="1.7" fill="#fff7e8" />
+            <circle cx="37.5" cy="25" r="1.7" fill="#fff7e8" />
+            {/* Bandana in player color */}
+            <path d="M21 40 L43 40 L32 48 Z" fill={color} stroke="#1b1510" strokeWidth="1.4" strokeLinejoin="round" />
+            {/* Eyes & nose */}
+            <circle cx="25.5" cy="29.5" r="2.2" fill="#1b1510" />
+            <circle cx="38.5" cy="29.5" r="2.2" fill="#1b1510" />
+            <ellipse cx="32" cy="33" rx="2.3" ry="1.6" fill="#1b1510" />
+          </g>
+        )}
 
-      {idx === 2 && (
-        /* 2: ช้างศึก (Royal War Elephant) */
-        <g>
-          {/* Tail */}
-          <path d="M14 33 C10 35 10 41 12 44" stroke="#1b1510" strokeWidth="2.2" strokeLinecap="round" fill="none" />
-          {/* Elephant body + legs + raised trunk */}
-          <path
-            d="M15 35 C14 25 22 19 34 20 C43 20 49 24 50 31 C53 31 56 26 55 21 C57 20 59 22 59 26 C59 33 54 37 49 36 L47 41 L47 52 L40 52 L40 43 L27 43 L27 52 L20 52 L19 42 L15 41 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="2"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M15 35 C14 25 22 19 34 20 C43 20 49 24 50 31 C53 31 56 26 55 21 C57 20 59 22 59 26 C59 33 54 37 49 36 L47 41 L47 52 L40 52 L40 43 L27 43 L27 52 L20 52 L19 42 L15 41 Z"
-            fill={`url(#${uid}-sheen)`}
-          />
-          {/* Ear */}
-          <path
-            d="M38 23 C33 23 32 32 37 35 C41 36 44 31 43 26 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="1.5"
-          />
-          <path
-            d="M38 23 C33 23 32 32 37 35 C41 36 44 31 43 26 Z"
-            fill="#000000"
-            opacity="0.16"
-          />
-          {/* Royal golden saddle cloth */}
-          <path
-            d="M21 23 C25 20 32 20 35 23 L34 34 L20 34 Z"
-            fill="#c8232c"
-            stroke={`url(#${uid}-metal)`}
-            strokeWidth="2"
-          />
-          <circle cx="27.5" cy="27.5" r="2.3" fill={`url(#${uid}-metal)`} />
-          {/* Ivory tusk */}
-          <path
-            d="M47 33 C51 35 55 34 57 30 C54 32 51 32 48 31 Z"
-            fill="#fff9ea"
-            stroke="#1b1510"
-            strokeWidth="1.2"
-          />
-          {/* Eye */}
-          <circle cx="46.5" cy="26" r="1.5" fill="#1b1510" />
-          <circle cx="46.9" cy="25.6" r="0.5" fill="#ffffff" />
-        </g>
-      )}
+        {idx === 2 && (
+          /* 2: แพนด้าเจ้าสัว (Cute Tycoon Panda) */
+          <g>
+            {/* Round black ears */}
+            <circle cx="20" cy="18" r="5.5" fill="#231f20" stroke="#1b1510" strokeWidth="1.6" />
+            <circle cx="44" cy="18" r="5.5" fill="#231f20" stroke="#1b1510" strokeWidth="1.6" />
+            {/* Body & head */}
+            <rect x="19" y="35" width="26" height="16" rx="8" fill="#231f20" stroke="#1b1510" strokeWidth="1.8" />
+            <ellipse cx="32" cy="44" rx="8" ry="6" fill="#ffffff" />
+            <rect x="15" y="18" width="34" height="24" rx="12" fill="#ffffff" stroke="#1b1510" strokeWidth="1.9" />
+            {/* Eye patches */}
+            <ellipse cx="25" cy="29.5" rx="4.2" ry="3.4" transform="rotate(-15 25 29.5)" fill="#231f20" />
+            <ellipse cx="39" cy="29.5" rx="4.2" ry="3.4" transform="rotate(15 39 29.5)" fill="#231f20" />
+            <circle cx="25.5" cy="29" r="1.4" fill="#ffffff" />
+            <circle cx="38.5" cy="29" r="1.4" fill="#ffffff" />
+            <ellipse cx="32" cy="34" rx="2.2" ry="1.5" fill="#231f20" />
+            {/* Mini bow tie in player color */}
+            <path d="M26 40 L32 42.5 L26 45 Z M38 40 L32 42.5 L38 45 Z" fill={color} stroke="#1b1510" strokeWidth="1.1" />
+          </g>
+        )}
 
-      {idx === 3 && (
-        /* 3: ตุ๊กตุ๊ก (Bangkok Tuk-Tuk) */
-        <g>
-          {/* Rear canopy support & passenger cabin */}
-          <path
-            d="M13 21 C18 16 36 16 42 20 L40 31 L14 31 Z"
-            fill="#fff6dc"
-            stroke="#1b1510"
-            strokeWidth="1.8"
-          />
-          {/* Red-blue-white Thai roof stripes */}
-          <path d="M16 19 C22 17 34 17 39 19" stroke="#c8232c" strokeWidth="2.4" fill="none" />
-          <path d="M15 22 L40 22" stroke="#1c4e8a" strokeWidth="2" />
-          {/* Cabin lower body */}
-          <path
-            d="M12 31 L42 31 L47 26 L53 33 L52 46 L11 46 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="2"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M12 31 L42 31 L47 26 L53 33 L52 46 L11 46 Z"
-            fill={`url(#${uid}-sheen)`}
-          />
-          {/* Front windshield & grille */}
-          <path d="M40 21 L47 26 L41 31 L39 21 Z" fill="#d9f0fa" stroke="#1b1510" strokeWidth="1.4" />
-          <circle cx="51.5" cy="36.5" r="2.8" fill="#fff7b8" stroke="#1b1510" strokeWidth="1.3" />
-          <rect x="47" y="40" width="4.5" height="4" rx="1" fill={`url(#${uid}-metal)`} stroke="#1b1510" strokeWidth="1" />
-          {/* Bench seat & trim */}
-          <rect x="17" y="33" width="15" height="6" rx="1.5" fill="#3a281d" stroke="#1b1510" strokeWidth="1.1" />
-          {/* Wheels */}
-          <circle cx="19" cy="47" r="6.8" fill="#231f1c" stroke="#120e0a" strokeWidth="1.5" />
-          <circle cx="19" cy="47" r="3.2" fill="#e8e2d5" />
-          <circle cx="46" cy="47" r="6.8" fill="#231f1c" stroke="#120e0a" strokeWidth="1.5" />
-          <circle cx="46" cy="47" r="3.2" fill="#e8e2d5" />
-        </g>
-      )}
+        {idx === 3 && (
+          /* 3: ต่ายน้อยร้อยล้าน (Cute Millionaire Bunny) */
+          <g>
+            {/* Long bunny ears */}
+            <rect x="21" y="7" width="7.5" height="17" rx="3.75" fill="#fff8fa" stroke="#1b1510" strokeWidth="1.7" />
+            <rect x="23" y="10" width="3.5" height="11" rx="1.75" fill="#f7a8b8" />
+            <rect x="35.5" y="7" width="7.5" height="17" rx="3.75" fill="#fff8fa" stroke="#1b1510" strokeWidth="1.7" />
+            <rect x="37.5" y="10" width="3.5" height="11" rx="1.75" fill="#f7a8b8" />
+            {/* Body & head */}
+            <rect x="20" y="36" width="24" height="15" rx="7" fill={color} stroke="#1b1510" strokeWidth="1.8" />
+            <rect x="16" y="20" width="32" height="22" rx="11" fill="#fff8fa" stroke="#1b1510" strokeWidth="1.9" />
+            {/* Eyes & rosy cheeks */}
+            <circle cx="25.5" cy="30.5" r="2.2" fill="#1b1510" />
+            <circle cx="38.5" cy="30.5" r="2.2" fill="#1b1510" />
+            <ellipse cx="21" cy="33.5" rx="2.5" ry="1.4" fill="#f79bb4" opacity="0.8" />
+            <ellipse cx="43" cy="33.5" rx="2.5" ry="1.4" fill="#f79bb4" opacity="0.8" />
+            <circle cx="32" cy="33" r="1.6" fill="#f07892" />
+          </g>
+        )}
 
-      {idx === 4 && (
-        /* 4: หมวกเศรษฐี (Millionaire Top Hat) */
-        <g>
-          {/* Crown */}
-          <path
-            d="M19 16 C23 13 41 13 45 16 L47 41 L17 41 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="2"
-          />
-          <path
-            d="M19 16 C23 13 41 13 45 16 L47 41 L17 41 Z"
-            fill={`url(#${uid}-sheen)`}
-          />
-          {/* Top ellipse */}
-          <ellipse cx="32" cy="15.5" rx="13" ry="3.6" fill={color} stroke="#1b1510" strokeWidth="1.8" />
-          <ellipse cx="32" cy="15.5" rx="12" ry="2.8" fill="#ffffff" opacity="0.22" />
-          {/* Satin ribbon band + gold buckle */}
-          <path d="M17.5 34 C25 36.5 39 36.5 46.5 34 L47 40.5 C39 43 25 43 17 40.5 Z" fill="#1b1510" />
-          <rect x="28.5" y="35" width="7" height="5.5" rx="1.2" fill={`url(#${uid}-metal)`} stroke="#1b1510" strokeWidth="1" />
-          {/* Curled brim */}
-          <path
-            d="M9 41 C13 46 51 46 55 41 C56 44 50 51 32 51 C14 51 8 44 9 41 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="2"
-          />
-          <path
-            d="M10 42 C18 46.5 46 46.5 54 42"
-            stroke="#ffffff"
-            strokeWidth="1.4"
-            strokeOpacity="0.45"
-            fill="none"
-          />
-        </g>
-      )}
+        {idx === 4 && (
+          /* 4: หนุ่มน้อยนักลงทุน (Cute Mini Boy Investor) */
+          <g>
+            {/* Suit body */}
+            <rect x="20" y="34" width="24" height="17" rx="6" fill={color} stroke="#1b1510" strokeWidth="1.8" />
+            <path d="M29 34 L32 42 L35 34 Z" fill="#ffffff" />
+            <path d="M31 35 L32 44 L33 35 Z" fill="#e53935" />
+            {/* Chibi head */}
+            <rect x="17" y="15" width="30" height="22" rx="10" fill="#ffe0bd" stroke="#1b1510" strokeWidth="1.9" />
+            {/* Stylish hair */}
+            <path d="M16 24 C16 14 25 11 35 12 C44 13 48 18 47 24 C43 19 36 18 28 20 C22 21 19 23 16 24 Z" fill="#3b2618" stroke="#1b1510" strokeWidth="1.6" />
+            {/* Eyes & smile */}
+            <circle cx="26" cy="27" r="2.1" fill="#1b1510" />
+            <circle cx="38" cy="27" r="2.1" fill="#1b1510" />
+            <path d="M29 32 Q32 34.5 35 32" stroke="#1b1510" strokeWidth="1.6" strokeLinecap="round" fill="none" />
+          </g>
+        )}
 
-      {idx === 5 && (
-        /* 5: ถุงทอง (Plump Tied Gold Money Bag) */
-        <g>
-          {/* Ruffled bag top */}
-          <path
-            d="M23 12 L28 15 L32 10 L36 15 L41 12 L38 22 L26 22 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="1.8"
-            strokeLinejoin="round"
-          />
-          {/* Plump bag pouch */}
-          <path
-            d="M25 22 C16 28 12 37 14 45 C16 51 23 53 32 53 C41 53 48 51 50 45 C52 37 48 28 39 22 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="2"
-          />
-          <path
-            d="M25 22 C16 28 12 37 14 45 C16 51 23 53 32 53 C41 53 48 51 50 45 C52 37 48 28 39 22 Z"
-            fill={`url(#${uid}-sheen)`}
-          />
-          {/* Rope tie */}
-          <rect x="24.5" y="20.5" width="15" height="4.2" rx="2" fill={`url(#${uid}-metal)`} stroke="#1b1510" strokeWidth="1.3" />
-          {/* Embossed Baht crest */}
-          <circle cx="32" cy="38" r="9.5" fill={`url(#${uid}-metal)`} stroke="#1b1510" strokeWidth="1.3" />
-          <text
-            x="32"
-            y="42.5"
-            textAnchor="middle"
-            fontSize="13.5"
-            fontWeight="800"
-            fill="#2b1c08"
-            fontFamily="var(--font-display)"
-          >
-            ฿
-          </text>
-        </g>
-      )}
+        {idx === 5 && (
+          /* 5: สาวน้อยไฮโซ (Cute Mini Girl Socialite) */
+          <g>
+            {/* Back hair */}
+            <rect x="14" y="16" width="36" height="26" rx="12" fill="#5c3317" stroke="#1b1510" strokeWidth="1.7" />
+            {/* Dress body */}
+            <path d="M19 50 L22 34 L42 34 L45 50 Z" fill={color} stroke="#1b1510" strokeWidth="1.8" strokeLinejoin="round" />
+            {/* Chibi head */}
+            <rect x="18" y="16" width="28" height="21" rx="10" fill="#ffe3c4" stroke="#1b1510" strokeWidth="1.8" />
+            {/* Cute bangs & ribbon */}
+            <path d="M17 24 C18 15 26 13 32 14 C38 13 46 15 47 24 C42 20 36 19 32 21 C28 19 22 20 17 24 Z" fill="#5c3317" stroke="#1b1510" strokeWidth="1.5" />
+            <circle cx="32" cy="14" r="3" fill={`url(#${uid}-metal)`} stroke="#1b1510" strokeWidth="1.1" />
+            {/* Eyes & blush */}
+            <circle cx="26" cy="27.5" r="2.1" fill="#1b1510" />
+            <circle cx="38" cy="27.5" r="2.1" fill="#1b1510" />
+            <ellipse cx="22.5" cy="30.5" rx="2.2" ry="1.2" fill="#f79bb4" />
+            <ellipse cx="41.5" cy="30.5" rx="2.2" ry="1.2" fill="#f79bb4" />
+            <path d="M29.5 32 Q32 34 34.5 32" stroke="#1b1510" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+          </g>
+        )}
 
-      {idx === 6 && (
-        /* 6: รถซุปเปอร์คาร์ (Sleek Low-Slung Supercar) */
-        <g>
-          {/* Rear GT Wing */}
-          <path
-            d="M11 33 L19 33 L21 38 L14 38 Z"
-            fill={`url(#${uid}-metal)`}
-            stroke="#1b1510"
-            strokeWidth="1.5"
-          />
-          {/* Aerodynamic wedge chassis */}
-          <path
-            d="M9 46 C9 39 14 37 22 36 L29 27 C34 25 41 25 46 31 L55 37 C57.5 39 58 43 56 47 L11 47 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="2"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M9 46 C9 39 14 37 22 36 L29 27 C34 25 41 25 46 31 L55 37 C57.5 39 58 43 56 47 L11 47 Z"
-            fill={`url(#${uid}-sheen)`}
-          />
-          {/* Panoramic cockpit canopy */}
-          <path d="M26 35 L31 28.5 L42 29 L46 35 Z" fill="#172536" stroke="#1b1510" strokeWidth="1.2" />
-          {/* Racing gold stripe & wheels */}
-          <path d="M16 40 L52 40" stroke={`url(#${uid}-metal)`} strokeWidth="2.2" strokeLinecap="round" />
-          <circle cx="20" cy="47.5" r="5.6" fill="#231c15" stroke="#1b1510" strokeWidth="1.5" />
-          <circle cx="20" cy="47.5" r="2.4" fill={`url(#${uid}-metal)`} />
-          <circle cx="45" cy="47.5" r="5.6" fill="#231c15" stroke="#1b1510" strokeWidth="1.5" />
-          <circle cx="45" cy="47.5" r="2.4" fill={`url(#${uid}-metal)`} />
-        </g>
-      )}
+        {idx === 6 && (
+          /* 6: เพนกวินทักซิโด้ (Cute Tuxedo Penguin) */
+          <g>
+            <rect x="17" y="16" width="30" height="34" rx="14" fill="#222a38" stroke="#1b1510" strokeWidth="1.9" />
+            <ellipse cx="32" cy="36" rx="10" ry="11" fill="#ffffff" />
+            <circle cx="26" cy="26" r="2.1" fill="#ffffff" />
+            <circle cx="26" cy="26" r="1.2" fill="#1b1510" />
+            <circle cx="38" cy="26" r="2.1" fill="#ffffff" />
+            <circle cx="38" cy="26" r="1.2" fill="#1b1510" />
+            {/* Golden beak & bow tie */}
+            <path d="M28 29 L36 29 L32 34 Z" fill="#ffb300" stroke="#1b1510" strokeWidth="1.3" strokeLinejoin="round" />
+            <path d="M26 36 L32 38.5 L26 41 Z M38 36 L32 38.5 L38 41 Z" fill={color} stroke="#1b1510" strokeWidth="1.1" />
+          </g>
+        )}
 
-      {idx === 7 && (
-        /* 7: ราชสีห์ทอง (Sculpted Crowned Royal Lion Bust) */
-        <g>
-          {/* Radiant royal mane */}
-          <path
-            d="M32 14 L38 18 L45 17 L47 24 L52 29 L48 36 L50 43 L43 46 L38 51 L32 49 L26 51 L21 46 L14 43 L16 36 L12 29 L17 24 L19 17 L26 18 Z"
-            fill={color}
-            stroke="#1b1510"
-            strokeWidth="1.9"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M32 14 L38 18 L45 17 L47 24 L52 29 L48 36 L50 43 L43 46 L38 51 L32 49 L26 51 L21 46 L14 43 L16 36 L12 29 L17 24 L19 17 L26 18 Z"
-            fill={`url(#${uid}-sheen)`}
-          />
-          {/* Lion face shield */}
-          <circle cx="32" cy="34" r="10.5" fill={`url(#${uid}-metal)`} stroke="#1b1510" strokeWidth="1.4" />
-          <circle cx="28" cy="31.5" r="1.6" fill="#1b1510" />
-          <circle cx="36" cy="31.5" r="1.6" fill="#1b1510" />
-          <path d="M29.5 36.5 L34.5 36.5 L32 39.5 Z" fill="#2b1c08" />
-          {/* Royal crown */}
-          <path
-            d="M23 19 L25 11 L32 15 L39 11 L41 19 Z"
-            fill={`url(#${uid}-metal)`}
-            stroke="#1b1510"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-        </g>
-      )}
+        {idx === 7 && (
+          /* 7: จิ้งจอกจอมดีล (Cute Clever Fox) */
+          <g>
+            <path d="M16 26 L16 12 L27 20 Z" fill="#e86a2c" stroke="#1b1510" strokeWidth="1.8" strokeLinejoin="round" />
+            <path d="M48 26 L48 12 L37 20 Z" fill="#e86a2c" stroke="#1b1510" strokeWidth="1.8" strokeLinejoin="round" />
+            <rect x="20" y="36" width="24" height="15" rx="7" fill={color} stroke="#1b1510" strokeWidth="1.8" />
+            <rect x="16" y="19" width="32" height="22" rx="10" fill="#e86a2c" stroke="#1b1510" strokeWidth="1.9" />
+            <path d="M17 32 C22 32 27 38 32 38 C37 38 42 32 47 32 C46 38 40 41 32 41 C24 41 18 38 17 32 Z" fill="#fff6e8" />
+            <circle cx="25.5" cy="29" r="2.1" fill="#1b1510" />
+            <circle cx="38.5" cy="29" r="2.1" fill="#1b1510" />
+            <circle cx="32" cy="34" r="2" fill="#1b1510" />
+          </g>
+        )}
+
+        {idx === 8 && (
+          /* 8: ลูกเจี๊ยบเศรษฐี (Cute Golden Chick) */
+          <g>
+            <path d="M29 14 C29 10 35 10 34 15" stroke="#ffca28" strokeWidth="3" strokeLinecap="round" fill="none" />
+            <rect x="16" y="17" width="32" height="32" rx="15" fill="#ffd54f" stroke="#1b1510" strokeWidth="1.9" />
+            <rect x="20" y="39" width="24" height="11" rx="5.5" fill={color} stroke="#1b1510" strokeWidth="1.5" />
+            <circle cx="25.5" cy="28" r="2.2" fill="#1b1510" />
+            <circle cx="38.5" cy="28" r="2.2" fill="#1b1510" />
+            <ellipse cx="21" cy="31" rx="2.4" ry="1.3" fill="#ff8a65" />
+            <ellipse cx="43" cy="31" rx="2.4" ry="1.3" fill="#ff8a65" />
+            <path d="M29 30 L35 30 L32 34.5 Z" fill="#ff7043" stroke="#1b1510" strokeWidth="1.2" strokeLinejoin="round" />
+          </g>
+        )}
+
+        {idx === 9 && (
+          /* 9: ช้างน้อยคู่บารมี (Cute Chibi Baby Elephant) */
+          <g>
+            {/* Big floppy ears */}
+            <rect x="9" y="20" width="11" height="17" rx="5.5" fill="#90a4ae" stroke="#1b1510" strokeWidth="1.8" />
+            <rect x="44" y="20" width="11" height="17" rx="5.5" fill="#90a4ae" stroke="#1b1510" strokeWidth="1.8" />
+            <rect x="20" y="36" width="24" height="15" rx="7" fill={color} stroke="#1b1510" strokeWidth="1.8" />
+            <rect x="17" y="18" width="30" height="23" rx="11" fill="#b0bec5" stroke="#1b1510" strokeWidth="1.9" />
+            {/* Cute trunk & royal crown */}
+            <path d="M30 31 L30 37 C30 39.5 35 39.5 35 37" stroke="#90a4ae" strokeWidth="4.5" strokeLinecap="round" fill="none" />
+            <path d="M30 31 L30 37 C30 39.5 35 39.5 35 37" stroke="#1b1510" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+            <path d="M26 18 L28 12 L32 15 L36 12 L38 18 Z" fill={`url(#${uid}-metal)`} stroke="#1b1510" strokeWidth="1.3" strokeLinejoin="round" />
+            <circle cx="24.5" cy="28" r="2" fill="#1b1510" />
+            <circle cx="39.5" cy="28" r="2" fill="#1b1510" />
+          </g>
+        )}
+
+        {idx === 10 && (
+          /* 10: บาริสต้าหนุ่มชิค (Cute Hipster Boy Character) */
+          <g>
+            <rect x="20" y="34" width="24" height="17" rx="6" fill={color} stroke="#1b1510" strokeWidth="1.8" />
+            <rect x="17" y="16" width="30" height="21" rx="10" fill="#ffe0bd" stroke="#1b1510" strokeWidth="1.9" />
+            {/* Cute beanie cap */}
+            <path d="M16 23 C16 13 48 13 48 23 Z" fill={color} stroke="#1b1510" strokeWidth="1.8" />
+            <rect x="15" y="20" width="34" height="4.5" rx="2.2" fill="#2d241e" stroke="#1b1510" strokeWidth="1.3" />
+            {/* Round glasses */}
+            <circle cx="26" cy="28" r="3.6" fill="#ffffff" fillOpacity="0.4" stroke="#1b1510" strokeWidth="1.6" />
+            <circle cx="38" cy="28" r="3.6" fill="#ffffff" fillOpacity="0.4" stroke="#1b1510" strokeWidth="1.6" />
+            <line x1="29.6" y1="28" x2="34.4" y2="28" stroke="#1b1510" strokeWidth="1.5" />
+            <circle cx="26" cy="28" r="1.4" fill="#1b1510" />
+            <circle cx="38" cy="28" r="1.4" fill="#1b1510" />
+          </g>
+        )}
+
+        {idx === 11 && (
+          /* 11: คุณหนูนักช้อป (Cute Shopper Girl Character) */
+          <g>
+            {/* Twin tails */}
+            <circle cx="15" cy="25" r="5" fill="#d97b29" stroke="#1b1510" strokeWidth="1.6" />
+            <circle cx="49" cy="25" r="5" fill="#d97b29" stroke="#1b1510" strokeWidth="1.6" />
+            <path d="M19 50 L22 34 L42 34 L45 50 Z" fill={color} stroke="#1b1510" strokeWidth="1.8" strokeLinejoin="round" />
+            <rect x="18" y="16" width="28" height="21" rx="10" fill="#ffe3c4" stroke="#1b1510" strokeWidth="1.8" />
+            <path d="M17 24 C18 14 46 14 47 24 C41 19 23 19 17 24 Z" fill="#d97b29" stroke="#1b1510" strokeWidth="1.6" />
+            <circle cx="26" cy="27.5" r="2.1" fill="#1b1510" />
+            <circle cx="38" cy="27.5" r="2.1" fill="#1b1510" />
+            <ellipse cx="22.5" cy="30.5" rx="2.2" ry="1.2" fill="#f79bb4" />
+            <ellipse cx="41.5" cy="30.5" rx="2.2" ry="1.2" fill="#f79bb4" />
+            <path d="M29.5 32 Q32 34.5 34.5 32" stroke="#1b1510" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+          </g>
+        )}
       </g>
     </svg>
   );

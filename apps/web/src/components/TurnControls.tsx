@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   JAIL_BAIL_AMOUNT,
   canBuildOnCurrentTile,
+  canHostileTakeoverCurrentTile,
   canMortgageTile,
   canRollAgain,
   canRollTurnOrder,
@@ -19,7 +20,6 @@ import {
   Building2,
   CheckCircle2,
   Coins,
-  Dices,
   Home,
   KeyRound,
   Landmark,
@@ -28,9 +28,11 @@ import {
   ShoppingBag,
   SkipForward,
   Skull,
+  Zap,
 } from 'lucide-react';
 import { Dice3D, type DiceValue } from '../artwork';
 import { formatBahtNumber } from '../utils/boardLayout';
+import { DiceChargeButton } from './DiceChargeButton';
 
 export interface TurnControlsProps {
   gameState: GameState;
@@ -93,6 +95,9 @@ export function TurnControls({
     : { allowed: false };
   const unmortgageCheck = isMyTurn
     ? canUnmortgageCurrentTile(gameState, currentPlayer.id)
+    : { allowed: false };
+  const takeoverCheck = isMyTurn
+    ? canHostileTakeoverCurrentTile(gameState, currentPlayer.id)
     : { allowed: false };
 
   const currentTile = getTile(currentPlayer.position);
@@ -288,16 +293,20 @@ export function TurnControls({
           </div>
         )}
 
-      {/* Roll Dice Button (Desktop only; Mobile uses MobileBottomDock) */}
+      {/* Roll Dice Button with Charge Gauge (Desktop only; Mobile uses MobileBottomDock) */}
       {showRollButton && (
-        <button
-          type="button"
-          onClick={() => onDispatchAction({ type: 'ROLL_DICE', playerId: effectivePlayerId })}
-          className="tactile-btn hidden lg:flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300/60 bg-gradient-to-b from-[#228d4f] to-[#155e34] px-4 py-3 text-base font-extrabold text-amber-50 shadow-[0_6px_18px_rgba(16,185,129,0.28)] hover:brightness-110"
-        >
-          <Dices className="h-5 w-5 text-amber-200" />
-          <span>{rollLabel}</span>
-        </button>
+        <DiceChargeButton
+          label={rollLabel}
+          enableCharge={gameState.phase !== 'TURN_ORDER_ROLL' && !currentPlayer.inJail}
+          currentTileIndex={currentPlayer.position}
+          onRoll={(powerRange) =>
+            onDispatchAction({
+              type: 'ROLL_DICE',
+              playerId: effectivePlayerId,
+              powerRange,
+            })
+          }
+        />
       )}
 
       {/* Buy / Decline Decision (NO AUCTION) (Desktop only; Mobile uses MobileBottomDock) */}
@@ -341,10 +350,10 @@ export function TurnControls({
           </div>
         )}
 
-      {/* Action Phase: Land-on-own-tile Build / Unmortgage (Desktop only; Mobile uses MobileBottomDock) */}
+      {/* Action Phase: Land-on-own-tile Build / Unmortgage / Hostile Takeover (Desktop only; Mobile uses MobileBottomDock) */}
       {isMyTurn && !isAnimatingMove && gameState.phase === 'ACTION_PHASE' && (
         <div className="hidden lg:block space-y-2">
-          {(buildCheck.allowed || unmortgageCheck.allowed) && (
+          {(buildCheck.allowed || unmortgageCheck.allowed || takeoverCheck.allowed) && (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {buildCheck.allowed && (
                 <button
@@ -383,6 +392,24 @@ export function TurnControls({
                 >
                   <RotateCcw className="h-4 w-4" />
                   <span>ไถ่ถอนจำนอง (฿{formatBahtNumber(unmortgageCheck.cost ?? 0)})</span>
+                </button>
+              )}
+
+              {takeoverCheck.allowed && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onDispatchAction({
+                      type: 'HOSTILE_TAKEOVER_CURRENT_TILE',
+                      playerId: effectivePlayerId,
+                    })
+                  }
+                  className="tactile-btn sm:col-span-2 flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-amber-300/80 bg-gradient-to-r from-[#7c2d12] via-[#b45309] to-[#7c2d12] px-3 py-2 text-xs font-extrabold text-amber-50 shadow-[0_0_16px_rgba(245,158,11,0.3)] hover:brightness-110"
+                >
+                  <Zap className="h-4 w-4 text-amber-300" />
+                  <span>
+                    ซื้อฮุบโฉนด 2× ทันที (฿{formatBahtNumber(takeoverCheck.cost ?? 0)})
+                  </span>
                 </button>
               )}
             </div>

@@ -1,5 +1,10 @@
 import { createPortal } from 'react-dom';
-import { calculatePlayerNetWorth, type GameState } from '@super-millionaire/shared';
+import {
+  calculatePlayerNetWorth,
+  countCompletedColorGroups,
+  getTile,
+  type GameState,
+} from '@super-millionaire/shared';
 import { Crown, LogOut, RotateCcw, Trophy } from 'lucide-react';
 import { PlayerToken } from '../artwork';
 import { formatBahtNumber } from '../utils/boardLayout';
@@ -22,10 +27,19 @@ export function GameOverModal({
   }
 
   const rankings = [...gameState.players]
-    .map((p) => ({
-      player: p,
-      netWorth: calculatePlayerNetWorth(gameState, p.id),
-    }))
+    .map((p) => {
+      const ownedDeeds = Object.values(gameState.deeds).filter((d) => d.ownerId === p.id);
+      const hotelCount = ownedDeeds.filter(
+        (d) => (getTile(d.tileIndex).colorGroup === 'hotel' || d.hasHotel) && !d.isMortgaged,
+      ).length;
+      const monopolyCount = countCompletedColorGroups(gameState, p.id).length;
+      return {
+        player: p,
+        netWorth: calculatePlayerNetWorth(gameState, p.id),
+        monopolyCount,
+        hotelCount,
+      };
+    })
     .sort((a, b) => {
       if (a.player.id === gameState.winnerId) return -1;
       if (b.player.id === gameState.winnerId) return 1;
@@ -59,6 +73,11 @@ export function GameOverModal({
               <Crown className="h-4 w-4 text-amber-300" />
             </div>
           )}
+          {gameState.victoryReason && (
+            <div className="mt-2 rounded-xl border border-amber-300/40 bg-black/35 px-3 py-1.5 text-xs font-bold text-amber-200">
+              {gameState.victoryReason}
+            </div>
+          )}
         </div>
 
         <div className="space-y-4 p-5">
@@ -66,7 +85,7 @@ export function GameOverModal({
             <div className="text-xs font-bold uppercase tracking-wide text-stone-600">
               อันดับมูลค่าทรัพย์สินสุทธิ
             </div>
-            {rankings.map(({ player, netWorth }, idx) => (
+            {rankings.map(({ player, netWorth, monopolyCount, hotelCount }, idx) => (
               <div
                 key={player.id}
                 className={`flex items-center justify-between rounded-xl border px-3 py-2 text-sm ${
@@ -75,14 +94,23 @@ export function GameOverModal({
                     : 'border-stone-300 bg-white/80'
                 }`}
               >
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <span className="mono-num w-5 text-center font-extrabold text-stone-600">
                     #{idx + 1}
                   </span>
                   <PlayerToken tokenId={player.tokenId} color={player.color} size={22} />
-                  <span>{player.name}</span>
+                  <div className="min-w-0">
+                    <div className="truncate">{player.name}</div>
+                    {(monopolyCount > 0 || hotelCount > 0) && (
+                      <div className="text-[10px] font-semibold text-stone-600">
+                        {monopolyCount > 0 ? `ครบสี ${monopolyCount} ชุด` : ''}
+                        {monopolyCount > 0 && hotelCount > 0 ? ' • ' : ''}
+                        {hotelCount > 0 ? `รร. ${hotelCount} แห่ง` : ''}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <span className="mono-num font-extrabold text-[#1b7a43]">
+                <span className="mono-num shrink-0 font-extrabold text-[#1b7a43]">
                   {player.isBankrupt ? 'ล้มละลาย' : `฿${formatBahtNumber(netWorth)}`}
                 </span>
               </div>

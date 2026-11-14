@@ -1,14 +1,18 @@
-import { INITIAL_BANKNOTES, INITIAL_CASH, cloneBanknotes } from './banknotes.js';
+import { INITIAL_BANKNOTES, INITIAL_CASH, cloneBanknotes, roundToNearestTen } from './banknotes.js';
 import {
   adjustPlayerCash,
   buildTileLedgerLabel,
+  calculatePlayerNetWorth,
   calculateRent,
   calculateUnmortgageCost,
+  countCompletedColorGroups,
   createInitialBankerState,
   formatBaht,
+  getCurrentRoundNumber,
   getDeedLevel,
   hasAnyBuildingInColorGroup,
   hasMortgagedInColorGroup,
+  ownsAllGrandHotels,
   ownsFullColorGroup,
   recordBankerEntry,
   setPlayerCash,
@@ -26,6 +30,7 @@ import {
   PLAYER_COLORS,
   PURCHASABLE_TILE_INDICES,
   START_BONUS,
+  TOKEN_NAMES,
   getTile,
 } from './boardData.js';
 import type {
@@ -33,8 +38,10 @@ import type {
   CardDefinition,
   DebtState,
   DeedState,
+  DicePowerRange,
   DiceRollResult,
   GameAction,
+  GameRulesConfig,
   GameState,
   LedgerEntry,
   PlayerSlotConfig,
@@ -46,6 +53,32 @@ import type {
   TurnOrderRoundRecord,
   TurnOrderState,
 } from './types.js';
+
+export const DEFAULT_GAME_RULES: Required<GameRulesConfig> = {
+  maxRounds: 30,
+  monopolyVictory: true,
+  hostileTakeover: true,
+  escalatingRent: true,
+};
+
+export function normalizeGameRules(
+  raw?: Partial<GameRulesConfig> | null,
+): Required<GameRulesConfig> {
+  const maxRounds =
+    raw && 'maxRounds' in raw
+      ? typeof raw.maxRounds === 'number' &&
+        Number.isFinite(raw.maxRounds) &&
+        raw.maxRounds >= 5
+        ? Math.trunc(raw.maxRounds)
+        : null
+      : DEFAULT_GAME_RULES.maxRounds;
+  return {
+    maxRounds,
+    monopolyVictory: raw?.monopolyVictory ?? DEFAULT_GAME_RULES.monopolyVictory,
+    hostileTakeover: raw?.hostileTakeover ?? DEFAULT_GAME_RULES.hostileTakeover,
+    escalatingRent: raw?.escalatingRent ?? DEFAULT_GAME_RULES.escalatingRent,
+  };
+}
 
 export interface EngineResult {
   ok: boolean;
@@ -138,7 +171,55 @@ function activePlayersCount(state: GameState): number {
   return state.players.filter((p) => !p.isBankrupt).length;
 }
 
-function rollTwoDice(rollInput?: RollInput): DiceRollResult {
+const DICE_PAIRS_BY_RANGE: Readonly<Record<DicePowerRange, ReadonlyArray<readonly [number, number]>>> = {
+  // 2..5
+  low: [
+    [1, 1],
+    [1, 2],
+    [2, 1],
+    [1, 3],
+    [2, 2],
+    [3, 1],
+    [1, 4],
+    [2, 3],
+    [3, 2],
+    [4, 1],
+  ],
+  // 6..8
+  mid: [
+    [1, 5],
+    [2, 4],
+    [3, 3],
+    [4, 2],
+    [5, 1],
+    [1, 6],
+    [2, 5],
+    [3, 4],
+    [4, 3],
+    [5, 2],
+    [6, 1],
+    [2, 6],
+    [3, 5],
+    [4, 4],
+    [5, 3],
+    [6, 2],
+  ],
+  // 9..12
+  high: [
+    [3, 6],
+    [4, 5],
+    [5, 4],
+    [6, 3],
+    [4, 6],
+    [5, 5],
+    [6, 4],
+    [5, 6],
+    [6, 5],
+    [6, 6],
+  ],
+};
+
+function rollTwoDice(rollInput?: RollInput, powerRange?: DicePowerRange): DiceRollResult {
   let die1: number;
   let die2: number;
   if (Array.isArray(rollInput)) {
@@ -146,14 +227,27 @@ function rollTwoDice(rollInput?: RollInput): DiceRollResult {
     die2 = Math.max(1, Math.min(6, Math.trunc(rollInput[1])));
   } else {
     const rng = typeof rollInput === 'function' ? rollInput : Math.random;
-    die1 = Math.floor(rng() * 6) + 1;
-    die2 = Math.floor(rng() * 6) + 1;
+    const validRange =
+      powerRange === 'low' || powerRange === 'mid' || powerRange === 'high'
+        ? powerRange
+        : undefined;
+    // When player charges into a range, give ~68% chance of landing within that range and ~32% full random
+    if (validRange && rng() < 0.68) {
+      const pool = DICE_PAIRS_BY_RANGE[validRange];
+      const picked = pool[Math.floor(rng() * pool.length)]!;
+      die1 = picked[0];
+      die2 = picked[1];
+    } else {
+      die1 = Math.floor(rng() * 6) + 1;
+      die2 = Math.floor(rng() * 6) + 1;
+    }
   }
   return {
     die1,
     die2,
     total: die1 + die2,
     isDoubles: die1 === die2,
+    ...(powerRange ? { powerRange } : {}),
   };
 }
 
@@ -376,6 +470,101 @@ export function canMortgageTile(
   return { allowed: true, proceeds };
 }
 
+export function canHostileTakeoverCurrentTile(
+  state: GameState,
+  playerId: string,
+): { allowed: boolean; reason?: string; cost?: number; targetOwnerId?: string } {
+  if (!state.rules?.hostileTakeover) {
+    return { allowed: false, reason: 'ไม่ได้เปิดกติกาซื้อฮุบที่ดิน 2× ในห้องนี้' };
+  }
+  if (state.phase !== 'ACTION_PHASE') {
+    return { allowed: false, reason: 'สามารถซื้อฮุบที่ดินได้เฉพาะในช่วง ACTION_PHASE' };
+  }
+  const current = getCurrentPlayer(state);
+  if (current.id !== playerId || current.isBankrupt || current.inJail) {
+    return { allowed: false, reason: 'ไม่ใช่ตาของคุณหรือกำลังติดคุก' };
+  }
+
+  const tileIndex = current.position;
+  const tile = getTile(tileIndex);
+  if (tile.type !== 'property' && tile.type !== 'utility') {
+    return { allowed: false, reason: 'สามารถซื้อฮุบได้เฉพาะที่ดินหรือสาธารณูปโภค (ไม่สามารถฮุบโรงแรมใหญ่ได้)' };
+  }
+
+  const deed = state.deeds[tileIndex];
+  if (!deed || !deed.ownerId || deed.ownerId === playerId) {
+    return { allowed: false, reason: 'ต้องยืนอยู่บนโฉนดของผู้เล่นอื่นจึงจะซื้อฮุบได้' };
+  }
+  if (deed.hasHotel) {
+    return { allowed: false, reason: 'ไม่สามารถซื้อฮุบที่ดินที่สร้างโรงแรมแล้วได้' };
+  }
+
+  const baseValue = (tile.price ?? 0) + deed.houses * (tile.houseCost ?? 0);
+  const cost = roundToNearestTen(baseValue * 2);
+  if (current.cash < cost) {
+    return {
+      allowed: false,
+      reason: `เงินสดไม่พอสำหรับซื้อฮุบ 2× (${formatBaht(cost)})`,
+      cost,
+      targetOwnerId: deed.ownerId,
+    };
+  }
+
+  return {
+    allowed: true,
+    cost,
+    targetOwnerId: deed.ownerId,
+  };
+}
+
+function checkSpecialVictory(state: GameState, entries: LedgerEntry[]): GameState {
+  if (state.phase === 'GAME_OVER' || !state.rules?.monopolyVictory) {
+    return state;
+  }
+
+  for (const player of state.players) {
+    if (player.isBankrupt) continue;
+    const completedGroups = countCompletedColorGroups(state, player.id);
+    if (completedGroups.length >= 3) {
+      const reason = 'ชนะด้วยการผูกขาดที่ดินครบ 3 กลุ่มสี!';
+      let next: GameState = {
+        ...state,
+        phase: 'GAME_OVER',
+        winnerId: player.id,
+        victoryReason: reason,
+        pendingDecisionTileIndex: null,
+        pendingDebt: null,
+      };
+      next = appendEntry(next, entries, {
+        type: 'GAME_OVER',
+        actorId: player.id,
+        message: `🏆 จบเกม! ${player.name} ${reason}`,
+      });
+      return next;
+    }
+
+    if (ownsAllGrandHotels(state, player.id)) {
+      const reason = 'ชนะด้วยการผูกขาดเครือโรงแรมใหญ่ครบทั้ง 5 แห่ง!';
+      let next: GameState = {
+        ...state,
+        phase: 'GAME_OVER',
+        winnerId: player.id,
+        victoryReason: reason,
+        pendingDecisionTileIndex: null,
+        pendingDebt: null,
+      };
+      next = appendEntry(next, entries, {
+        type: 'GAME_OVER',
+        actorId: player.id,
+        message: `🏆 จบเกม! ${player.name} ${reason}`,
+      });
+      return next;
+    }
+  }
+
+  return state;
+}
+
 export interface CreateGameStateOptions {
   skipTurnOrderRoll?: boolean;
 }
@@ -411,13 +600,19 @@ export function createGameState(
         : `ผู้เล่น ${seat + 1}`;
     const name = slot?.name?.trim() ? slot.name.trim() : defaultName;
 
+    const rawToken = slot?.tokenId;
+    const resolvedTokenId =
+      typeof rawToken === 'number' && Number.isFinite(rawToken) && rawToken >= 0
+        ? Math.trunc(rawToken) % TOKEN_NAMES.length
+        : seat % TOKEN_NAMES.length;
+
     players.push({
       id: `player-${seat + 1}`,
       seatIndex: seat,
       name,
       kind,
       botStyle: kind === 'bot' ? (slot?.botStyle ?? 'balanced') : undefined,
-      tokenId: seat,
+      tokenId: resolvedTokenId,
       color: PLAYER_COLORS[seat % PLAYER_COLORS.length]!,
       cash: INITIAL_CASH,
       banknotes: cloneBanknotes(INITIAL_BANKNOTES),
@@ -456,6 +651,10 @@ export function createGameState(
   return {
     roomId,
     phase: skipTurnOrderRoll ? 'AWAIT_ROLL' : 'TURN_ORDER_ROLL',
+    mapTheme: config.mapTheme ?? 'siam_park',
+    rules: normalizeGameRules(config.rules),
+    startedAt: Date.now(),
+    victoryReason: null,
     players,
     currentTurnIndex: 0,
     turnNumber: 1,
@@ -792,6 +991,7 @@ function drawCard(
       card,
       playerId,
       turnNumber: state.turnNumber,
+      drawnAtTileIndex: player.position,
     },
   };
 
@@ -1184,6 +1384,7 @@ export function rollDice(
   state: GameState,
   playerId: string,
   rollInput?: RollInput,
+  powerRange?: DicePowerRange,
 ): EngineResult {
   const check = requireCurrentPlayer(state, playerId);
   if (!check.ok) return fail(state, check.error);
@@ -1201,7 +1402,8 @@ export function rollDice(
   }
 
   const rng = typeof rollInput === 'function' ? rollInput : Math.random;
-  const dice = rollTwoDice(rollInput);
+  const effectiveRange = !player.inJail ? powerRange : undefined;
+  const dice = rollTwoDice(rollInput, effectiveRange);
   const entries: LedgerEntry[] = [];
 
   let next: GameState = {
@@ -1211,10 +1413,19 @@ export function rollDice(
     pendingDecisionTileIndex: null,
   };
 
+  const rangeBadge =
+    effectiveRange === 'low'
+      ? ' [ชาร์จเล็ง 2–5]'
+      : effectiveRange === 'mid'
+        ? ' [ชาร์จเล็ง 6–8]'
+        : effectiveRange === 'high'
+          ? ' [ชาร์จเล็ง 9–12]'
+          : '';
+
   next = appendEntry(next, entries, {
     type: 'DICE_ROLL',
     actorId: playerId,
-    message: `${player.name} ทอยได้ ${dice.die1} + ${dice.die2} = ${dice.total}${dice.isDoubles ? ' (เบิ้ล!)' : ''}`,
+    message: `${player.name} ทอยได้ ${dice.die1} + ${dice.die2} = ${dice.total}${dice.isDoubles ? ' (เบิ้ล!)' : ''}${rangeBadge}`,
   });
 
   // Case 1: Player is currently in jail
@@ -1454,6 +1665,47 @@ export function buyCurrentTile(state: GameState, playerId: string): EngineResult
     message: `${player.name} ซื้อโฉนด ${buildTileLedgerLabel(tileIndex)} ราคา ${formatBaht(tile.price)}`,
   });
 
+  next = checkSpecialVictory(next, entries);
+  return ok(next, entries);
+}
+
+export function hostileTakeoverCurrentTile(
+  state: GameState,
+  playerId: string,
+): EngineResult {
+  const check = requireCurrentPlayer(state, playerId);
+  if (!check.ok) return fail(state, check.error);
+  const player = check.player;
+
+  const eligibility = canHostileTakeoverCurrentTile(state, playerId);
+  if (!eligibility.allowed || eligibility.cost === undefined || !eligibility.targetOwnerId) {
+    return fail(state, eligibility.reason ?? 'ไม่สามารถซื้อฮุบโฉนดนี้ได้');
+  }
+
+  const tileIndex = player.position;
+  const cost = eligibility.cost;
+  const targetOwnerId = eligibility.targetOwnerId;
+  const targetOwner = findPlayer(state, targetOwnerId);
+  const entries: LedgerEntry[] = [];
+
+  let next = updatePlayer(state, playerId, (p) => adjustPlayerCash(p, -cost));
+  next = updatePlayer(next, targetOwnerId, (p) => adjustPlayerCash(p, cost));
+  next = updateDeed(next, tileIndex, (d) => ({
+    ...d,
+    ownerId: playerId,
+    isMortgaged: false,
+  }));
+
+  next = appendEntry(next, entries, {
+    type: 'TAKEOVER',
+    actorId: playerId,
+    targetId: targetOwnerId,
+    amount: cost,
+    tileIndex,
+    message: `⚔️ ${player.name} ซื้อฮุบโฉนด ${buildTileLedgerLabel(tileIndex)} ต่อจาก ${targetOwner?.name ?? 'เจ้าของเดิม'} ในราคา 2× (${formatBaht(cost)})!`,
+  });
+
+  next = checkSpecialVictory(next, entries);
   return ok(next, entries);
 }
 
@@ -1808,6 +2060,7 @@ export function declareBankruptcy(state: GameState, playerId: string): EngineRes
       ...next,
       phase: 'GAME_OVER',
       winnerId: winner?.id ?? null,
+      victoryReason: 'ผู้เล่นคนอื่นล้มละลายทั้งหมด',
     };
     next = appendEntry(next, entries, {
       type: 'GAME_OVER',
@@ -1816,6 +2069,11 @@ export function declareBankruptcy(state: GameState, playerId: string): EngineRes
         ? `จบเกม! ${winner.name} เป็นซุปเปอร์เศรษฐีผู้ชนะเพียงหนึ่งเดียว!`
         : 'จบเกม!',
     });
+    return ok(next, entries);
+  }
+
+  next = checkSpecialVictory(next, entries);
+  if (next.phase === 'GAME_OVER') {
     return ok(next, entries);
   }
 
@@ -2051,6 +2309,7 @@ export function respondTradeOffer(
     message: `${fromPlayer.name} และ ${toPlayer.name} ตกลงแลกเปลี่ยนทรัพย์สินสำเร็จ!`,
   });
 
+  next = checkSpecialVictory(next, entries);
   return ok(next, entries);
 }
 
@@ -2070,11 +2329,12 @@ export function endTurn(state: GameState, playerId: string): EngineResult {
   const entries: LedgerEntry[] = [];
   const nextIdx = getNextActiveTurnIndex(state.players, state.currentTurnIndex);
   const nextPlayer = state.players[nextIdx]!;
+  const nextTurnNumber = state.turnNumber + 1;
 
   let next: GameState = {
     ...state,
     currentTurnIndex: nextIdx,
-    turnNumber: state.turnNumber + 1,
+    turnNumber: nextTurnNumber,
     phase: 'AWAIT_ROLL',
     hasRolledThisTurn: false,
     doublesCount: 0,
@@ -2086,6 +2346,42 @@ export function endTurn(state: GameState, playerId: string): EngineResult {
         : t,
     ),
   };
+
+  const maxRounds = next.rules?.maxRounds ?? null;
+  const nextRound = getCurrentRoundNumber(next);
+  if (maxRounds && nextRound > maxRounds) {
+    const activeRanked = next.players
+      .filter((p) => !p.isBankrupt)
+      .map((p) => ({
+        player: p,
+        netWorth: calculatePlayerNetWorth(next, p.id),
+      }))
+      .sort((a, b) => {
+        if (b.netWorth !== a.netWorth) return b.netWorth - a.netWorth;
+        return b.player.cash - a.player.cash;
+      });
+
+    const richest = activeRanked[0];
+    const reason = richest
+      ? `ครบกำหนด ${maxRounds} รอบ — ชนะด้วยมูลค่าทรัพย์สินสุทธิสูงสุด (${formatBaht(richest.netWorth)})`
+      : `ครบกำหนด ${maxRounds} รอบ`;
+
+    next = {
+      ...next,
+      phase: 'GAME_OVER',
+      winnerId: richest?.player.id ?? null,
+      victoryReason: reason,
+    };
+    next = appendEntry(next, entries, {
+      type: 'GAME_OVER',
+      actorId: richest?.player.id,
+      amount: richest?.netWorth,
+      message: richest
+        ? `🏆 จบเกม! ครบกำหนด ${maxRounds} รอบ — ${richest.player.name} ชนะด้วยมูลค่าทรัพย์สินสุทธิสูงสุด ${formatBaht(richest.netWorth)}!`
+        : `จบเกมครบ ${maxRounds} รอบ!`,
+    });
+    return ok(next, entries);
+  }
 
   next = appendEntry(next, entries, {
     type: 'TURN_END',
@@ -2104,7 +2400,7 @@ export function applyGameAction(
 ): EngineResult {
   switch (action.type) {
     case 'ROLL_DICE':
-      return rollDice(state, action.playerId, rng);
+      return rollDice(state, action.playerId, rng, action.powerRange);
     case 'PAY_JAIL_BAIL':
       return payJailBail(state, action.playerId);
     case 'USE_JAIL_CARD':
@@ -2121,6 +2417,8 @@ export function applyGameAction(
       return mortgageTile(state, action.playerId, action.tileIndex);
     case 'UNMORTGAGE_CURRENT_TILE':
       return unmortgageCurrentTile(state, action.playerId);
+    case 'HOSTILE_TAKEOVER_CURRENT_TILE':
+      return hostileTakeoverCurrentTile(state, action.playerId);
     case 'DECLARE_BANKRUPTCY':
       return declareBankruptcy(state, action.playerId);
     case 'CREATE_TRADE_OFFER':

@@ -9,6 +9,7 @@ import {
 } from './boardData.js';
 import {
   canBuildOnCurrentTile,
+  canHostileTakeoverCurrentTile,
   canMortgageTile,
   canRollAgain,
   canRollTurnOrder,
@@ -266,6 +267,18 @@ export function decideNextBotAction(
         const cost = calculateUnmortgageCost(tile);
         if (bot.cash - cost >= profile.unmortgageReserve) {
           return { type: 'UNMORTGAGE_CURRENT_TILE', playerId: botPlayerId };
+        }
+      }
+
+      // 1b. Hostile Takeover on opponent's tile if rule enabled and advantageous
+      const takeoverCheck = canHostileTakeoverCurrentTile(state, botPlayerId);
+      if (takeoverCheck.allowed && takeoverCheck.cost !== undefined) {
+        const completesSet = wouldCompleteMonopoly(state, botPlayerId, bot.position);
+        const minCashAfter = completesSet
+          ? profile.monopolyBuyReserve
+          : profile.buyReserve + 2200;
+        if (bot.cash - takeoverCheck.cost >= minCashAfter) {
+          return { type: 'HOSTILE_TAKEOVER_CURRENT_TILE', playerId: botPlayerId };
         }
       }
 

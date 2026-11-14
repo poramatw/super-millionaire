@@ -32,16 +32,43 @@ export type BanknoteBreakdown = Record<BanknoteDenomination, number>;
 
 export type BotStyle = 'aggressive' | 'balanced' | 'cautious';
 
+export type BoardMapTheme =
+  | 'siam_park'
+  | 'bangkok_metro'
+  | 'tropical_island'
+  | 'royal_palace';
+
+export interface BoardMapThemeMeta {
+  id: BoardMapTheme;
+  name: string;
+  subtitle: string;
+  badge: string;
+}
+
 export interface PlayerSlotConfig {
   seatIndex: number;
   kind: 'human' | 'bot';
   name?: string;
   botStyle?: BotStyle;
+  tokenId?: number;
+}
+
+export interface GameRulesConfig {
+  /** Max rounds before winner is decided by highest Net Worth (null = unlimited, or 20 / 30 / 40). */
+  maxRounds?: number | null;
+  /** Instant victory when owning 3 full color groups OR all 5 Grand Hotels. */
+  monopolyVictory?: boolean;
+  /** Allow buying an opponent's non-hotel property/utility for 2x its value upon landing on it. */
+  hostileTakeover?: boolean;
+  /** Escalating rent multiplier: 1.5x from round 15+, 2.0x from round 25+. */
+  escalatingRent?: boolean;
 }
 
 export interface RoomConfig {
   totalSeats: 2 | 3 | 4 | 5 | 6 | 7 | 8;
   slots: PlayerSlotConfig[];
+  mapTheme?: BoardMapTheme;
+  rules?: GameRulesConfig;
 }
 
 export type GamePhase =
@@ -140,6 +167,7 @@ export type LedgerEntryType =
   | 'BAIL'
   | 'JAIL_CARD'
   | 'TRADE'
+  | 'TAKEOVER'
   | 'BANKRUPTCY'
   | 'GAME_OVER'
   | 'TURN_END';
@@ -185,17 +213,21 @@ export interface DebtState {
   tileIndex?: number;
 }
 
+export type DicePowerRange = 'low' | 'mid' | 'high';
+
 export interface DiceRollResult {
   die1: number;
   die2: number;
   total: number;
   isDoubles: boolean;
+  powerRange?: DicePowerRange;
 }
 
 export interface DrawnCardInfo {
   card: CardDefinition;
   playerId: string;
   turnNumber: number;
+  drawnAtTileIndex?: number;
 }
 
 export interface TurnOrderRollRecord {
@@ -223,6 +255,10 @@ export interface TurnOrderState {
 export interface GameState {
   roomId: string;
   phase: GamePhase;
+  mapTheme?: BoardMapTheme;
+  rules?: GameRulesConfig;
+  startedAt?: number;
+  victoryReason?: string | null;
   players: PlayerState[];
   currentTurnIndex: number;
   turnNumber: number;
@@ -274,7 +310,7 @@ export interface TradeOfferInput {
 }
 
 export type GameAction =
-  | { type: 'ROLL_DICE'; playerId: string }
+  | { type: 'ROLL_DICE'; playerId: string; powerRange?: DicePowerRange }
   | { type: 'PAY_JAIL_BAIL'; playerId: string }
   | { type: 'USE_JAIL_CARD'; playerId: string }
   | { type: 'BUY_CURRENT_TILE'; playerId: string }
@@ -283,6 +319,7 @@ export type GameAction =
   | { type: 'SELL_HOUSE_ON_TILE'; playerId: string; tileIndex: number }
   | { type: 'MORTGAGE_TILE'; playerId: string; tileIndex: number }
   | { type: 'UNMORTGAGE_CURRENT_TILE'; playerId: string }
+  | { type: 'HOSTILE_TAKEOVER_CURRENT_TILE'; playerId: string }
   | { type: 'DECLARE_BANKRUPTCY'; playerId: string }
   | { type: 'CREATE_TRADE_OFFER'; playerId: string; offer: TradeOfferInput }
   | { type: 'RESPOND_TRADE_OFFER'; playerId: string; tradeId: string; accept: boolean }
@@ -310,6 +347,7 @@ export interface ClientToServerEvents {
       roomId: string;
       playerName: string;
       preferredSeatIndex?: number;
+      preferredTokenId?: number;
       asSpectator?: boolean;
     },
     cb?: (res: RoomJoinAck) => void,

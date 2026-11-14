@@ -1,11 +1,12 @@
 import {
   calculatePlayerNetWorth,
+  countCompletedColorGroups,
   getCurrentPlayer,
   getTile,
   type GameAction,
   type GameState,
 } from '@super-millionaire/shared';
-import { Bot, Check, KeyRound, Lock, Skull, Wifi, WifiOff, X } from 'lucide-react';
+import { Bot, Check, Crown, KeyRound, Lock, Skull, Trophy, Wifi, WifiOff, X } from 'lucide-react';
 import { PlayerToken } from '../artwork';
 import { formatBahtNumber } from '../utils/boardLayout';
 
@@ -21,7 +22,6 @@ export interface PlayerStripProps {
 export function PlayerStrip({
   gameState,
   myPlayerId,
-  isSpectator = false,
   selectedPlayerId,
   onSelectPlayer,
   onDispatchAction,
@@ -33,6 +33,46 @@ export function PlayerStrip({
         (t) => t.status === 'PENDING' && t.toPlayerId === myPlayerId,
       )
     : [];
+
+  // Rank players by highest total Net Worth (active players first, then bankrupt)
+  const rankedPlayers = [...gameState.players]
+    .map((p) => {
+      const ownedDeeds = Object.values(gameState.deeds).filter((d) => d.ownerId === p.id);
+      const deedCount = ownedDeeds.length;
+      const hotelCount = ownedDeeds.filter(
+        (d) => (getTile(d.tileIndex).colorGroup === 'hotel' || d.hasHotel) && !d.isMortgaged,
+      ).length;
+      const monopolyCount = countCompletedColorGroups(gameState, p.id).length;
+      const netWorth = calculatePlayerNetWorth(gameState, p.id);
+      return {
+        player: p,
+        deedCount,
+        hotelCount,
+        monopolyCount,
+        netWorth,
+      };
+    })
+    .sort((a, b) => {
+      if (a.player.isBankrupt !== b.player.isBankrupt) {
+        return a.player.isBankrupt ? 1 : -1;
+      }
+      if (b.netWorth !== a.netWorth) {
+        return b.netWorth - a.netWorth;
+      }
+      if (b.monopolyCount !== a.monopolyCount) {
+        return b.monopolyCount - a.monopolyCount;
+      }
+      if (b.hotelCount !== a.hotelCount) {
+        return b.hotelCount - a.hotelCount;
+      }
+      if (b.deedCount !== a.deedCount) {
+        return b.deedCount - a.deedCount;
+      }
+      if (b.player.cash !== a.player.cash) {
+        return b.player.cash - a.player.cash;
+      }
+      return a.player.seatIndex - b.player.seatIndex;
+    });
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -127,26 +167,40 @@ export function PlayerStrip({
         );
       })}
 
-      {/* Player Cards */}
+      {/* Leaderboard Header */}
+      <div className="flex items-center justify-between px-1 text-[11px] font-bold text-amber-200/85">
+        <span className="inline-flex items-center gap-1.5">
+          <Trophy className="h-3.5 w-3.5 text-amber-300" />
+          <span>อันดับมูลค่าทรัพย์สินสุทธิ</span>
+        </span>
+        <span className="text-[10px] font-medium text-stone-400">
+          แตะผู้เล่นเพื่อดูโฉนด & กระเป๋าเงิน
+        </span>
+      </div>
+
+      {/* Ranked Player Cards */}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
-        {gameState.players.map((p) => {
+        {rankedPlayers.map(({ player: p, deedCount, hotelCount, monopolyCount, netWorth }, rankIdx) => {
+          const rank = rankIdx + 1;
           const isTurn = currentPlayer.id === p.id && gameState.phase !== 'GAME_OVER';
           const isMe = myPlayerId === p.id;
-          const hideFinances = Boolean(myPlayerId && !isSpectator && !isMe);
           const isInspected = selectedPlayerId === p.id;
-          const deedCount = Object.values(gameState.deeds).filter(
-            (d) => d.ownerId === p.id,
-          ).length;
-          const netWorth = hideFinances ? 0 : calculatePlayerNetWorth(gameState, p.id);
+
+          const rankBadgeClass = p.isBankrupt
+            ? 'border-stone-700 bg-stone-900 text-stone-500'
+            : rank === 1
+              ? 'border-amber-300 bg-gradient-to-b from-amber-300 to-amber-500 text-stone-950 shadow-[0_0_10px_rgba(251,191,36,0.45)]'
+              : rank === 2
+                ? 'border-slate-300/70 bg-slate-200 text-slate-950'
+                : rank === 3
+                  ? 'border-amber-600/80 bg-amber-700 text-amber-50'
+                  : 'border-stone-700 bg-stone-800 text-stone-300';
 
           return (
             <button
               key={p.id}
               type="button"
-              disabled={hideFinances}
-              onClick={() => {
-                if (!hideFinances) onSelectPlayer(p.id);
-              }}
+              onClick={() => onSelectPlayer(p.id)}
               className={`flex items-center justify-between gap-2.5 rounded-xl border p-2.5 text-left transition ${
                 p.isBankrupt
                   ? 'border-stone-800/80 bg-stone-950/60 opacity-55'
@@ -155,9 +209,21 @@ export function PlayerStrip({
                     : isInspected
                       ? 'border-sky-400/60 bg-stone-900/95'
                       : 'border-amber-500/20 bg-stone-900/80 hover:border-amber-400/45'
-              } ${hideFinances ? 'cursor-default' : ''}`}
+              }`}
             >
               <div className="flex min-w-0 items-center gap-2.5">
+                {/* Rank Medal Badge */}
+                <div
+                  className={`mono-num flex h-7 w-7 shrink-0 flex-col items-center justify-center rounded-lg border text-xs font-black ${rankBadgeClass}`}
+                  title={`อันดับที่ ${rank}`}
+                >
+                  {rank === 1 && !p.isBankrupt ? (
+                    <Crown className="h-3.5 w-3.5" />
+                  ) : (
+                    <span>#{rank}</span>
+                  )}
+                </div>
+
                 <div
                   className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-[#f7f0de]"
                   style={{ boxShadow: `inset 0 0 0 2px ${p.color}` }}
@@ -178,6 +244,11 @@ export function PlayerStrip({
                         คุณ
                       </span>
                     )}
+                    {isTurn && (
+                      <span className="rounded bg-amber-400/20 px-1.5 py-0.5 text-[9px] font-extrabold text-amber-300 ring-1 ring-amber-400/40">
+                        กำลังเล่น
+                      </span>
+                    )}
                     {p.kind === 'bot' ? (
                       <span className="inline-flex items-center gap-0.5 rounded border border-amber-500/35 bg-amber-950/75 px-1.5 py-0.5 text-[9px] font-bold text-amber-200">
                         <Bot className="h-2.5 w-2.5" />
@@ -192,13 +263,19 @@ export function PlayerStrip({
 
                   <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-stone-300">
                     <span className="inline-flex items-center gap-1">
-                      {hideFinances && (
-                        <span className="inline-block h-3 w-2 rounded-[2px] border border-amber-300/60 bg-amber-900/80" />
-                      )}
-                      {hideFinances ? 'ถือโฉนด' : 'โฉนด'}{' '}
-                      <span className="mono-num font-bold text-amber-200">{deedCount}</span>{' '}
-                      {hideFinances ? 'ใบ' : ''}
+                      โฉนด{' '}
+                      <span className="mono-num font-bold text-amber-200">{deedCount}</span>
                     </span>
+                    {monopolyCount > 0 && (
+                      <span className="rounded bg-emerald-950/90 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300 ring-1 ring-emerald-400/35">
+                        ครบสี {monopolyCount}
+                      </span>
+                    )}
+                    {hotelCount > 0 && (
+                      <span className="rounded bg-sky-950/90 px-1.5 py-0.2 text-[9px] font-bold text-amber-200 ring-1 ring-sky-400/35">
+                        รร. {hotelCount}
+                      </span>
+                    )}
                     {p.inJail && (
                       <span className="inline-flex items-center gap-0.5 rounded bg-red-900/80 px-1 py-0.5 text-[9px] font-bold text-red-200">
                         <Lock className="h-2.5 w-2.5" />
@@ -221,23 +298,12 @@ export function PlayerStrip({
               </div>
 
               <div className="shrink-0 text-right">
-                {hideFinances ? (
-                  <>
-                    <div className="mono-num text-sm font-extrabold text-stone-400">
-                      ฿ •••••
-                    </div>
-                    <div className="text-[10px] text-stone-500">ทรัพย์สินลับ</div>
-                  </>
-                ) : (
-                  <>
-                    <div className="mono-num text-sm font-extrabold text-emerald-300">
-                      ฿{formatBahtNumber(p.cash)}
-                    </div>
-                    <div className="mono-num text-[10px] text-stone-400">
-                      สุทธิ ฿{formatBahtNumber(netWorth)}
-                    </div>
-                  </>
-                )}
+                <div className="mono-num text-sm font-extrabold text-amber-300">
+                  ฿{formatBahtNumber(netWorth)}
+                </div>
+                <div className="mono-num text-[10px] font-semibold text-emerald-300/90">
+                  เงินสด ฿{formatBahtNumber(p.cash)}
+                </div>
               </div>
             </button>
           );

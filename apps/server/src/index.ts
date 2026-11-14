@@ -181,6 +181,7 @@ export function createAppServer(options: CreateAppServerOptions = {}): AppServer
         roomId: payload.roomId,
         playerName: typeof payload.playerName === 'string' ? payload.playerName : 'ผู้เล่น',
         preferredSeatIndex: payload.preferredSeatIndex,
+        preferredTokenId: payload.preferredTokenId,
         asSpectator: payload.asSpectator,
       });
 

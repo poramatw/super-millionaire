@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   calculateRent,
   canBuildOnCurrentTile,
+  canHostileTakeoverCurrentTile,
   canMortgageTile,
   canSellHouseOnTile,
   canUnmortgageCurrentTile,
@@ -12,7 +13,7 @@ import {
   type GameAction,
   type GameState,
 } from '@super-millionaire/shared';
-import { Building2, Coins, Home, Landmark, RotateCcw, X } from 'lucide-react';
+import { Building2, ChevronDown, ChevronUp, Coins, Home, Landmark, RotateCcw, X, Zap } from 'lucide-react';
 import { HotelPiece, HousePiece, OriginalTileCrop } from '../artwork';
 import { COLOR_GROUP_META, formatBahtNumber } from '../utils/boardLayout';
 
@@ -31,6 +32,12 @@ export function TileModal({
   onClose,
   onDispatchAction,
 }: TileModalProps) {
+  const [showLiquidationOptions, setShowLiquidationOptions] = useState(false);
+
+  useEffect(() => {
+    setShowLiquidationOptions(false);
+  }, [tileIndex]);
+
   useEffect(() => {
     if (tileIndex === null) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -80,6 +87,9 @@ export function TileModal({
   const mortgageCheck = isMyTurn
     ? canMortgageTile(gameState, myPlayerId!, tile.index)
     : { allowed: false };
+  const takeoverCheck = isMyTurn && isStandingHere
+    ? canHostileTakeoverCurrentTile(gameState, myPlayerId!)
+    : { allowed: false, cost: undefined, reason: undefined };
 
   const unmortgagePrice = tile.price !== undefined ? calculateUnmortgageCost(tile) : 0;
 
@@ -348,9 +358,27 @@ export function TileModal({
             </div>
           )}
 
-          {/* Acknowledge button when landing on an opponent's deed */}
+          {/* Acknowledge / Hostile Takeover buttons when landing on an opponent's deed */}
           {isMyTurn && isStandingHere && isOpponentDeed && (
-            <div className="border-t border-[#2a2118]/15 pt-3">
+            <div className="space-y-2 border-t border-[#2a2118]/15 pt-3">
+              {takeoverCheck.allowed && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDispatchAction({
+                      type: 'HOSTILE_TAKEOVER_CURRENT_TILE',
+                      playerId: myPlayerId!,
+                    });
+                    onClose();
+                  }}
+                  className="tactile-btn flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-amber-900 bg-gradient-to-r from-[#9a3412] via-[#c2410c] to-[#9a3412] px-4 py-2.5 text-xs font-extrabold text-white shadow-md hover:brightness-110"
+                >
+                  <Zap className="h-4 w-4 text-amber-200" />
+                  <span>
+                    ซื้อฮุบโฉนดนี้ทันที 2× (฿{formatBahtNumber(takeoverCheck.cost ?? 0)})
+                  </span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onClose}
@@ -370,76 +398,111 @@ export function TileModal({
                 </p>
               )}
 
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {buildCheck.allowed && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onDispatchAction({ type: 'BUILD_ON_CURRENT_TILE', playerId: myPlayerId! });
-                      onClose();
-                    }}
-                    className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-[#143d25] bg-[#1b7a43] px-3 py-2.5 text-xs font-bold text-white shadow"
-                  >
-                    {buildCheck.isHotelUpgrade ? (
-                      <Building2 className="h-4 w-4" />
-                    ) : (
-                      <Home className="h-4 w-4" />
-                    )}
-                    <span>
-                      {buildCheck.isHotelUpgrade ? 'สร้างโรงแรม' : 'สร้างบ้าน'} (฿
-                      {formatBahtNumber(buildCheck.cost ?? 0)})
-                    </span>
-                  </button>
-                )}
+              {(buildCheck.allowed || unmortgageCheck.allowed) && (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {buildCheck.allowed && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDispatchAction({ type: 'BUILD_ON_CURRENT_TILE', playerId: myPlayerId! });
+                        onClose();
+                      }}
+                      className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-[#143d25] bg-[#1b7a43] px-3 py-2.5 text-xs font-bold text-white shadow"
+                    >
+                      {buildCheck.isHotelUpgrade ? (
+                        <Building2 className="h-4 w-4" />
+                      ) : (
+                        <Home className="h-4 w-4" />
+                      )}
+                      <span>
+                        {buildCheck.isHotelUpgrade ? 'สร้างโรงแรม' : 'สร้างบ้าน'} (฿
+                        {formatBahtNumber(buildCheck.cost ?? 0)})
+                      </span>
+                    </button>
+                  )}
 
-                {unmortgageCheck.allowed && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onDispatchAction({ type: 'UNMORTGAGE_CURRENT_TILE', playerId: myPlayerId! });
-                      onClose();
-                    }}
-                    className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-emerald-800 bg-emerald-600 px-3 py-2.5 text-xs font-bold text-white shadow"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    <span>ไถ่ถอน (฿{formatBahtNumber(unmortgageCheck.cost ?? 0)})</span>
-                  </button>
-                )}
+                  {unmortgageCheck.allowed && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDispatchAction({ type: 'UNMORTGAGE_CURRENT_TILE', playerId: myPlayerId! });
+                        onClose();
+                      }}
+                      className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-emerald-800 bg-emerald-600 px-3 py-2.5 text-xs font-bold text-white shadow"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      <span>ไถ่ถอน (฿{formatBahtNumber(unmortgageCheck.cost ?? 0)})</span>
+                    </button>
+                  )}
+                </div>
+              )}
 
-                {sellCheck.allowed && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onDispatchAction({
-                        type: 'SELL_HOUSE_ON_TILE',
-                        playerId: myPlayerId!,
-                        tileIndex: tile.index,
-                      });
-                    }}
-                    className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-amber-700 bg-amber-500 px-3 py-2.5 text-xs font-bold text-stone-950 shadow"
-                  >
-                    <Coins className="h-4 w-4" />
-                    <span>ขายบ้านคืน (+฿{formatBahtNumber(sellCheck.refund ?? 0)})</span>
-                  </button>
-                )}
+              {/* Liquidation actions: Shown directly during debt resolution, or tucked behind a secondary toggle during normal play to prevent accidental misclicks */}
+              {(sellCheck.allowed || mortgageCheck.allowed) && (
+                <div className="pt-1">
+                  {!isInDebtMode && !showLiquidationOptions ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowLiquidationOptions(true)}
+                      className="flex w-full items-center justify-center gap-1 rounded-lg border border-stone-400/60 bg-stone-200/70 px-3 py-1.5 text-[11px] font-semibold text-stone-700 hover:bg-stone-300/70"
+                    >
+                      <span>ตัวเลือกสำรอง: ขายบ้านคืน / จำนองโฉนด</span>
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                  ) : (
+                    <div className="space-y-1.5 rounded-xl border border-rose-900/20 bg-rose-50/70 p-2">
+                      {!isInDebtMode && (
+                        <div className="flex items-center justify-between text-[10px] font-bold text-rose-900">
+                          <span>ระวัง: การจำนองหรือขายบ้านจะลดรายได้ค่าเช่า</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowLiquidationOptions(false)}
+                            className="inline-flex items-center gap-0.5 text-stone-600 hover:text-stone-900"
+                          >
+                            <span>ซ่อน</span>
+                            <ChevronUp className="h-3 w-3" />
+                          </button>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {sellCheck.allowed && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onDispatchAction({
+                                type: 'SELL_HOUSE_ON_TILE',
+                                playerId: myPlayerId!,
+                                tileIndex: tile.index,
+                              });
+                            }}
+                            className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-amber-700 bg-amber-500 px-3 py-2 text-xs font-bold text-stone-950 shadow"
+                          >
+                            <Coins className="h-4 w-4" />
+                            <span>ขายบ้านคืน (+฿{formatBahtNumber(sellCheck.refund ?? 0)})</span>
+                          </button>
+                        )}
 
-                {mortgageCheck.allowed && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onDispatchAction({
-                        type: 'MORTGAGE_TILE',
-                        playerId: myPlayerId!,
-                        tileIndex: tile.index,
-                      });
-                    }}
-                    className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-rose-900 bg-rose-700 px-3 py-2.5 text-xs font-bold text-white shadow"
-                  >
-                    <Landmark className="h-4 w-4" />
-                    <span>จำนอง (+฿{formatBahtNumber(mortgageCheck.proceeds ?? 0)})</span>
-                  </button>
-                )}
-              </div>
+                        {mortgageCheck.allowed && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onDispatchAction({
+                                type: 'MORTGAGE_TILE',
+                                playerId: myPlayerId!,
+                                tileIndex: tile.index,
+                              });
+                            }}
+                            className="tactile-btn flex items-center justify-center gap-1.5 rounded-xl border-2 border-rose-900 bg-rose-700 px-3 py-2 text-xs font-bold text-white shadow"
+                          >
+                            <Landmark className="h-4 w-4" />
+                            <span>จำนอง (+฿{formatBahtNumber(mortgageCheck.proceeds ?? 0)})</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

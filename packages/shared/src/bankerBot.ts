@@ -108,6 +108,46 @@ export function hasMortgagedInColorGroup(
   return indices.some((idx) => state.deeds[idx]?.isMortgaged === true);
 }
 
+export const STANDARD_PROPERTY_COLOR_GROUPS: readonly ColorGroup[] = [
+  'brown',
+  'lightBlue',
+  'darkGreen',
+  'orange',
+  'skyBlue',
+  'red',
+  'limeGreen',
+  'darkRed',
+];
+
+export function countCompletedColorGroups(
+  state: GameState,
+  playerId: string,
+): ColorGroup[] {
+  return STANDARD_PROPERTY_COLOR_GROUPS.filter((group) =>
+    ownsFullColorGroup(state, playerId, group),
+  );
+}
+
+export function ownsAllGrandHotels(state: GameState, playerId: string): boolean {
+  return COLOR_GROUP_TILES.hotel.every((idx) => {
+    const d = state.deeds[idx];
+    return Boolean(d && d.ownerId === playerId && !d.isMortgaged);
+  });
+}
+
+export function getCurrentRoundNumber(state: GameState): number {
+  const playerCount = Math.max(1, state.players.length);
+  return Math.max(1, Math.floor((Math.max(1, state.turnNumber) - 1) / playerCount) + 1);
+}
+
+export function getRentInflationMultiplier(state: GameState): number {
+  if (!state.rules?.escalatingRent) return 1;
+  const round = getCurrentRoundNumber(state);
+  if (round >= 25) return 2;
+  if (round >= 15) return 1.5;
+  return 1;
+}
+
 export function calculateUnmortgageCost(tile: TileDefinition): number {
   const principal = tile.mortgageValue ?? Math.floor((tile.price ?? 0) / 2);
   return roundToNearestTen(principal * 1.1);
@@ -125,17 +165,20 @@ export function calculateRent(
   }
 
   const ownerId = deed.ownerId;
+  const inflationMult = getRentInflationMultiplier(state);
+  let rawRent = 0;
 
   if (tile.type === 'property' && tile.rents && tile.colorGroup) {
     if (deed.hasHotel) {
-      return tile.rents[5] ?? 0;
+      rawRent = tile.rents[5] ?? 0;
+    } else if (deed.houses > 0) {
+      rawRent = tile.rents[deed.houses] ?? 0;
+    } else {
+      const baseRent = tile.rents[0] ?? 0;
+      const hasMonopoly = ownsFullColorGroup(state, ownerId, tile.colorGroup);
+      rawRent = hasMonopoly ? baseRent * 2 : baseRent;
     }
-    if (deed.houses > 0) {
-      return tile.rents[deed.houses] ?? 0;
-    }
-    const baseRent = tile.rents[0] ?? 0;
-    const hasMonopoly = ownsFullColorGroup(state, ownerId, tile.colorGroup);
-    return hasMonopoly ? baseRent * 2 : baseRent;
+    return inflationMult === 1 ? rawRent : roundToNearestTen(rawRent * inflationMult);
   }
 
   if (tile.type === 'hotel' && tile.rents) {
@@ -144,7 +187,8 @@ export function calculateRent(
       return d && d.ownerId === ownerId && !d.isMortgaged;
     }).length;
     if (unmortgagedHotelsOwned <= 0) return 0;
-    return tile.rents[Math.min(unmortgagedHotelsOwned, 5) - 1] ?? 0;
+    rawRent = tile.rents[Math.min(unmortgagedHotelsOwned, 5) - 1] ?? 0;
+    return inflationMult === 1 ? rawRent : roundToNearestTen(rawRent * inflationMult);
   }
 
   if (tile.type === 'utility') {
@@ -153,12 +197,11 @@ export function calculateRent(
       return d && d.ownerId === ownerId && !d.isMortgaged;
     }).length;
     if (unmortgagedUtilitiesOwned >= 2) {
-      return 100 * diceTotal;
+      rawRent = 100 * diceTotal;
+    } else if (unmortgagedUtilitiesOwned === 1) {
+      rawRent = 40 * diceTotal;
     }
-    if (unmortgagedUtilitiesOwned === 1) {
-      return 40 * diceTotal;
-    }
-    return 0;
+    return inflationMult === 1 ? rawRent : roundToNearestTen(rawRent * inflationMult);
   }
 
   return 0;
